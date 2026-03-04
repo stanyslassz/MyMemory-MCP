@@ -301,6 +301,97 @@ def inbox(ctx):
 
 
 @cli.command()
+@click.option("--all", "clean_all", is_flag=True, help="Remove all generated artifacts and caches")
+@click.option("--artifacts", is_flag=True, help="Remove generated artifacts (_context.md, _index.md, FAISS, graph)")
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without deleting")
+@click.pass_context
+def clean(ctx, clean_all, artifacts, dry_run):
+    """Remove generated files and caches. Backs up before destructive operations."""
+    import shutil
+    import tarfile
+    from datetime import datetime
+
+    config = ctx.obj["config"]
+    memory_path = config.memory_path
+
+    # Determine what to clean
+    if not clean_all and not artifacts:
+        console.print("[yellow]Specify --all or --artifacts. Use --dry-run to preview.[/yellow]")
+        return
+
+    targets: list[tuple[Path, str]] = []
+
+    # Artifact targets (always included with --artifacts or --all)
+    artifact_files = [
+        (memory_path / "_context.md", "generated context"),
+        (memory_path / "_index.md", "generated index"),
+        (memory_path / "_graph.json", "entity graph"),
+        (memory_path / "_graph.json.bak", "graph backup"),
+        (memory_path / "_graph.lock", "graph lockfile"),
+        (Path(config.faiss.index_path), "FAISS index"),
+        (Path(config.faiss.mapping_path), "FAISS mapping"),
+        (Path(config.faiss.manifest_path), "FAISS manifest"),
+        (Path(config.ingest.jobs_path), "ingest jobs"),
+    ]
+    for path, desc in artifact_files:
+        if path.exists():
+            targets.append((path, desc))
+
+    # Extended targets for --all
+    if clean_all:
+        pycache_dirs = list(Path(".").rglob("__pycache__"))
+        for d in pycache_dirs:
+            targets.append((d, "__pycache__"))
+        processed_dir = memory_path / "_inbox" / "_processed"
+        if processed_dir.exists():
+            targets.append((processed_dir, "processed inbox archive"))
+
+    if not targets:
+        console.print("[green]Nothing to clean.[/green]")
+        return
+
+    # Preview
+    console.print(f"[bold]{'[DRY RUN] ' if dry_run else ''}Files to remove:[/bold]")
+    for path, desc in targets:
+        console.print(f"  {desc}: {path}")
+
+    if dry_run:
+        console.print(f"\n[dim]{len(targets)} item(s) would be removed.[/dim]")
+        return
+
+    # Backup before destructive operations
+    backup_dir = Path("backups")
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"pre-clean-{stamp}.tar.gz"
+
+    existing_targets = [p for p, _ in targets if p.exists() and not str(p).endswith("__pycache__")]
+    if existing_targets:
+        console.print(f"\n[dim]Backing up to {backup_path}...[/dim]")
+        with tarfile.open(backup_path, "w:gz") as tar:
+            for path in existing_targets:
+                try:
+                    tar.add(path)
+                except Exception:
+                    pass
+        console.print(f"  [green]Backup saved ({backup_path})[/green]")
+
+    # Delete
+    removed = 0
+    for path, desc in targets:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+            removed += 1
+        except Exception as e:
+            console.print(f"  [red]Failed to remove {path}: {e}[/red]")
+
+    console.print(f"\n[bold green]Cleaned {removed} item(s).[/bold green]")
+
+
+@cli.command()
 @click.option(
     "--transport", "-t",
     type=click.Choice(["stdio", "sse"], case_sensitive=False),
