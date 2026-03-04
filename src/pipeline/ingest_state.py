@@ -1,4 +1,7 @@
-"""Ingest job state machine: idempotent ingest keys, upsert guard, job lifecycle."""
+"""Ingest job state machine: idempotent ingest keys, upsert guard, job lifecycle.
+
+Also includes the retry ledger for tracking extraction failures and enabling replay.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +16,71 @@ from src.core.config import Config
 from src.core.models import CHUNK_POLICY_VERSION, IngestJob, IngestKey
 
 logger = logging.getLogger(__name__)
+
+# ── Retry ledger ─────────────────────────────────────────────
+
+LEDGER_FILENAME = "_retry_ledger.json"
+
+
+def _ledger_path(config: Config) -> Path:
+    return config.memory_path / LEDGER_FILENAME
+
+
+def _load_ledger(config: Config) -> list[dict]:
+    path = _ledger_path(config)
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_ledger(config: Config, entries: list[dict]) -> None:
+    path = _ledger_path(config)
+    path.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def record_failure(chat_path: Path, error: str, config: Config) -> None:
+    """Record a failed extraction in the retry ledger."""
+    entries = _load_ledger(config)
+    # Avoid duplicate entries for the same file
+    existing = {e["file"] for e in entries if e.get("status") == "pending"}
+    fname = str(chat_path)
+    if fname in existing:
+        return
+    entries.append({
+        "file": fname,
+        "error": error,
+        "status": "pending",
+        "attempts": 1,
+        "recorded": datetime.now().isoformat(),
+        "last_attempt": datetime.now().isoformat(),
+    })
+    _save_ledger(config, entries)
+
+
+def list_retriable(config: Config) -> list[dict]:
+    """List all pending retry-ledger entries."""
+    return [e for e in _load_ledger(config) if e.get("status") == "pending"]
+
+
+def mark_replayed(chat_path: str, success: bool, config: Config, error: str | None = None) -> None:
+    """Update a ledger entry after replay attempt."""
+    entries = _load_ledger(config)
+    for entry in entries:
+        if entry["file"] == chat_path:
+            entry["attempts"] = entry.get("attempts", 0) + 1
+            entry["last_attempt"] = datetime.now().isoformat()
+            if success:
+                entry["status"] = "succeeded"
+            elif entry["attempts"] >= 3:
+                entry["status"] = "exhausted"
+                entry["error"] = error or entry.get("error", "")
+            else:
+                entry["error"] = error or entry.get("error", "")
+            break
+    _save_ledger(config, entries)
 
 
 def compute_ingest_key(source_id: str, content: str) -> IngestKey:

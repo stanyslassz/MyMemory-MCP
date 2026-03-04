@@ -87,6 +87,9 @@ def run(ctx):
                 reason = f"timeout: {e}" if is_timeout else f"max retries ({retries}): {e}"
                 console.print(f"  [yellow]Extraction failed, falling back to doc_ingest: {reason}[/yellow]")
                 _fallback_to_doc_ingest(chat_path, content, reason, memory_path, config)
+                # Record in retry ledger for potential future replay
+                from src.pipeline.ingest_state import record_failure
+                record_failure(chat_path, reason, config)
             else:
                 console.print(f"  [red]Extraction failed (retry {retries}/{EXTRACTION_MAX_RETRIES}): {e}[/red]")
             continue
@@ -406,6 +409,78 @@ def serve(ctx, transport):
     effective = transport or config.mcp_transport
     console.print(f"[bold]Starting MCP server (transport={effective})...[/bold]")
     run_server(config=config, transport_override=transport)
+
+
+@cli.command()
+@click.option("--list", "list_only", is_flag=True, help="List retriable failures without replaying")
+@click.pass_context
+def replay(ctx, list_only):
+    """Replay failed extractions from the retry ledger.
+
+    Retries chats that previously failed extraction, using the full
+    pipeline path (not doc-ingest fallback). Use --list to preview.
+    """
+    config = ctx.obj["config"]
+    from src.pipeline.ingest_state import list_retriable, mark_replayed
+
+    entries = list_retriable(config)
+    if not entries:
+        console.print("[green]No retriable failures in ledger.[/green]")
+        return
+
+    if list_only:
+        table = Table(title="Retry Ledger (pending)")
+        table.add_column("File", style="cyan")
+        table.add_column("Error", style="yellow", max_width=60)
+        table.add_column("Attempts", style="red")
+        table.add_column("Recorded", style="dim")
+        for e in entries:
+            table.add_row(
+                Path(e["file"]).name,
+                e.get("error", "")[:60],
+                str(e.get("attempts", 0)),
+                e.get("recorded", ""),
+            )
+        console.print(table)
+        return
+
+    console.print(f"[bold]Replaying {len(entries)} failed extraction(s)...[/bold]")
+
+    from src.memory.store import get_chat_content
+    from src.pipeline.extractor import extract_from_chat
+    from src.pipeline.resolver import resolve_all
+    from src.pipeline.enricher import enrich_memory
+    from src.memory.graph import load_graph
+    from src.memory.store import mark_chat_processed
+    from src.core.models import Resolution
+
+    for entry in entries:
+        chat_path = Path(entry["file"])
+        if not chat_path.exists():
+            console.print(f"  [dim]{chat_path.name}: file gone, skipping[/dim]")
+            mark_replayed(str(chat_path), success=False, config=config, error="file not found")
+            continue
+
+        console.print(f"\n[cyan]→ Replaying {chat_path.name}[/cyan]")
+        content = get_chat_content(chat_path)
+
+        try:
+            extraction = extract_from_chat(content, config)
+            console.print(f"  Extracted {len(extraction.entities)} entities")
+
+            graph = load_graph(config.memory_path)
+            resolved = resolve_all(extraction, graph)
+
+            report = enrich_memory(resolved, config)
+            mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
+            mark_replayed(str(chat_path), success=True, config=config)
+            console.print(f"  [green]Replay succeeded[/green]")
+
+        except Exception as e:
+            mark_replayed(str(chat_path), success=False, config=config, error=str(e))
+            console.print(f"  [red]Replay failed: {e}[/red]")
+
+    console.print("\n[bold green]Replay complete.[/bold green]")
 
 
 def _is_timeout_error(exc: Exception) -> bool:
