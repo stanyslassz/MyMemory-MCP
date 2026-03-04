@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -15,6 +18,7 @@ from src.core.config import Config, LLMStepConfig
 from src.core.models import EntityResolution, RawExtraction
 
 T = TypeVar("T", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 def strip_thinking(text: str) -> str:
@@ -86,8 +90,93 @@ def _call_structured(
     return client.chat.completions.create(**kwargs)
 
 
+class StallError(TimeoutError):
+    """Raised when LLM streaming stalls (no progress for stall_timeout seconds)."""
+    pass
+
+
+def _call_with_stall_detection(
+    step_config: LLMStepConfig,
+    prompt: str,
+    response_model: type[T],
+    stall_timeout: int = 30,
+) -> T:
+    """Call LLM with stall detection: timeout only fires on real stalls.
+
+    A stall is defined as no new tokens received for `stall_timeout` seconds.
+    Active streaming resets the watchdog, so long but progressing responses
+    are never killed.
+    """
+    result: T | None = None
+    error: Exception | None = None
+    last_activity = time.monotonic()
+    lock = threading.Lock()
+    done = threading.Event()
+
+    def _do_call():
+        nonlocal result, error, last_activity
+        try:
+            client = _get_client(step_config)
+            kwargs: dict[str, Any] = {
+                "model": step_config.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_model": response_model,
+                "max_retries": step_config.max_retries,
+                "temperature": step_config.temperature,
+                "stream": True,
+            }
+            if step_config.api_base:
+                kwargs["api_base"] = step_config.api_base
+            # Use a generous connection timeout but no overall read timeout —
+            # the watchdog thread handles stall detection instead.
+            kwargs["timeout"] = step_config.timeout * 3
+
+            partial = client.chat.completions.create_partial(**kwargs)
+            for chunk in partial:
+                with lock:
+                    last_activity = time.monotonic()
+                result = chunk  # keep last complete partial
+            # Final result is the last chunk (fully validated by Instructor)
+        except Exception as e:
+            error = e
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=_do_call, daemon=True)
+    worker.start()
+
+    # Watchdog: check for stalls
+    while not done.is_set():
+        done.wait(timeout=2.0)
+        if done.is_set():
+            break
+        with lock:
+            idle = time.monotonic() - last_activity
+        if idle > stall_timeout:
+            logger.warning(
+                "LLM stall detected: no tokens for %.0fs (threshold=%ds)",
+                idle, stall_timeout,
+            )
+            error = StallError(
+                f"LLM stalled: no progress for {idle:.0f}s "
+                f"(stall_timeout={stall_timeout}s)"
+            )
+            done.set()
+            break
+
+    if error is not None:
+        raise error
+    if result is None:
+        raise StallError("LLM call produced no output")
+    return result
+
+
 def call_extraction(chat_content: str, config: Config) -> RawExtraction:
-    """Step 1: Extract facts and entities from a chat conversation."""
+    """Step 1: Extract facts and entities from a chat conversation.
+
+    Uses stall-aware streaming: active token production resets the watchdog,
+    so only real stalls trigger a timeout — not slow but progressing responses.
+    """
     schema = json.dumps(RawExtraction.model_json_schema(), indent=2)
     prompt = load_prompt(
         "extract_facts",
@@ -95,7 +184,10 @@ def call_extraction(chat_content: str, config: Config) -> RawExtraction:
         chat_content=chat_content,
         json_schema=schema,
     )
-    return _call_structured(config.llm_extraction, prompt, RawExtraction)
+    stall_timeout = config.llm_extraction.timeout  # reuse timeout as stall threshold
+    return _call_with_stall_detection(
+        config.llm_extraction, prompt, RawExtraction, stall_timeout=stall_timeout,
+    )
 
 
 def call_arbitration(

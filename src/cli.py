@@ -318,8 +318,15 @@ def serve(ctx, transport):
 
 
 def _is_timeout_error(exc: Exception) -> bool:
-    """Check if an exception is a timeout-related error."""
-    timeout_indicators = ("timeout", "timed out", "ReadTimeout", "ConnectTimeout")
+    """Check if an exception is a timeout-related error.
+
+    Recognizes StallError from stall-aware extraction, plus standard
+    timeout exceptions from httpx/litellm.
+    """
+    from src.core.llm import StallError
+    if isinstance(exc, StallError):
+        return True
+    timeout_indicators = ("timeout", "timed out", "ReadTimeout", "ConnectTimeout", "stall")
     exc_str = str(exc).lower()
     exc_type = type(exc).__name__.lower()
     return any(t.lower() in exc_str or t.lower() in exc_type for t in timeout_indicators)
