@@ -40,7 +40,10 @@ def run(ctx):
     config = ctx.obj["config"]
     memory_path = config.memory_path
 
-    from src.memory.store import list_unprocessed_chats, get_chat_content, mark_chat_processed
+    from src.memory.store import (
+        list_unprocessed_chats, get_chat_content, mark_chat_processed,
+        mark_chat_fallback, increment_extraction_retries,
+    )
     from src.memory.graph import load_graph
     from src.pipeline.extractor import extract_from_chat
     from src.pipeline.resolver import resolve_all
@@ -49,6 +52,9 @@ def run(ctx):
     from src.pipeline.indexer import incremental_update
     from src.memory.context import build_context_input, write_context
     from src.core.models import Resolution
+
+    # Max extraction retries before falling back to doc_ingest
+    EXTRACTION_MAX_RETRIES = 2
 
     chats = list_unprocessed_chats(memory_path)
     if not chats:
@@ -73,7 +79,16 @@ def run(ctx):
             extraction = extract_from_chat(content, config)
             console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")
         except Exception as e:
-            console.print(f"  [red]Extraction failed: {e}[/red]")
+            is_timeout = _is_timeout_error(e)
+            retries = increment_extraction_retries(chat_path)
+            should_fallback = is_timeout or retries >= EXTRACTION_MAX_RETRIES
+
+            if should_fallback:
+                reason = f"timeout: {e}" if is_timeout else f"max retries ({retries}): {e}"
+                console.print(f"  [yellow]Extraction failed, falling back to doc_ingest: {reason}[/yellow]")
+                _fallback_to_doc_ingest(chat_path, content, reason, memory_path, config)
+            else:
+                console.print(f"  [red]Extraction failed (retry {retries}/{EXTRACTION_MAX_RETRIES}): {e}[/red]")
             continue
 
         # Step 2: Resolve
@@ -292,6 +307,46 @@ def serve(ctx):
     from src.mcp.server import run_server
     console.print("[bold]Starting MCP server...[/bold]")
     run_server()
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    """Check if an exception is a timeout-related error."""
+    timeout_indicators = ("timeout", "timed out", "ReadTimeout", "ConnectTimeout")
+    exc_str = str(exc).lower()
+    exc_type = type(exc).__name__.lower()
+    return any(t.lower() in exc_str or t.lower() in exc_type for t in timeout_indicators)
+
+
+def _fallback_to_doc_ingest(
+    chat_path, content: str, reason: str, memory_path, config,
+) -> None:
+    """Fall back to doc_ingest for a chat that failed extraction."""
+    from src.memory.store import mark_chat_fallback
+    from src.pipeline.ingest_state import compute_ingest_key, create_job, transition_job, has_been_ingested
+    from src.pipeline.doc_ingest import ingest_document
+
+    source_id = chat_path.name
+    key = compute_ingest_key(source_id, content)
+
+    if has_been_ingested(key, config):
+        console.print(f"  [dim]Already doc-ingested, marking processed[/dim]")
+        mark_chat_fallback(chat_path, fallback="doc_ingest", error=reason)
+        return
+
+    try:
+        job = create_job(key, config, route="fallback_doc_ingest")
+        transition_job(job.job_id, "running", config)
+        result = ingest_document(source_id, content, key, memory_path, config)
+        transition_job(
+            job.job_id, "succeeded", config,
+            chunks_indexed=result.get("chunks_indexed", 0),
+        )
+        console.print(f"  [green]Doc-ingest fallback OK: {result.get('chunks_indexed', 0)} chunks indexed[/green]")
+    except Exception as e2:
+        console.print(f"  [red]Doc-ingest fallback also failed: {e2}[/red]")
+
+    # Always mark processed so it's not retried for extraction
+    mark_chat_fallback(chat_path, fallback="doc_ingest", error=reason)
 
 
 if __name__ == "__main__":

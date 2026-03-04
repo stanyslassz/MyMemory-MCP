@@ -237,6 +237,43 @@ def mark_chat_processed(
     filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
 
 
+def mark_chat_fallback(
+    filepath: Path,
+    fallback: str,
+    error: str = "",
+) -> None:
+    """Mark a chat as processed via fallback (e.g. doc_ingest after extraction timeout).
+
+    Sets processed=True plus fallback metadata so it is never retried for extraction.
+    """
+    text = filepath.read_text(encoding="utf-8")
+    fm_data, body = _parse_frontmatter(text)
+
+    fm_data["processed"] = True
+    fm_data["processed_at"] = datetime.now().isoformat()
+    fm_data["fallback"] = fallback
+    if error:
+        fm_data["fallback_reason"] = error
+    fm_data["entities_updated"] = []
+    fm_data["entities_created"] = []
+
+    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
+    filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+
+
+def increment_extraction_retries(filepath: Path) -> int:
+    """Increment and return the extraction_retries counter in chat frontmatter."""
+    text = filepath.read_text(encoding="utf-8")
+    fm_data, body = _parse_frontmatter(text)
+
+    retries = fm_data.get("extraction_retries", 0) + 1
+    fm_data["extraction_retries"] = retries
+
+    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
+    filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+    return retries
+
+
 def get_chat_content(filepath: Path) -> str:
     """Read a chat file and return only the body content (no frontmatter)."""
     text = filepath.read_text(encoding="utf-8")
