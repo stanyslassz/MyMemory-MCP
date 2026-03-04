@@ -1,0 +1,88 @@
+"""Step 2: Resolve extracted entity names to existing entities (deterministic, 0 LLM tokens)."""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from typing import Callable, Optional
+
+from src.core.models import (
+    GraphData,
+    RawExtraction,
+    Resolution,
+    ResolvedEntity,
+    ResolvedExtraction,
+)
+
+
+def slugify(text: str) -> str:
+    """Convert a title to a slug (lowercase, hyphens, ASCII)."""
+    text = unicodedata.normalize("NFKD", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^\w\s-]", "", text.lower())
+    text = re.sub(r"[-\s]+", "-", text).strip("-")
+    return text
+
+
+def resolve_entity(
+    name: str,
+    graph: GraphData,
+    faiss_search_fn: Optional[Callable] = None,
+) -> Resolution:
+    """Resolve a free-form entity name against the graph.
+
+    Resolution order:
+    1. Exact match by slug ID
+    2. Alias containment check
+    3. FAISS similarity search (if available)
+    4. New entity
+    """
+    slug = slugify(name)
+
+    # 1. Exact match by ID
+    if slug in graph.entities:
+        return Resolution(status="resolved", entity_id=slug)
+
+    # 2. Match by alias (containment check)
+    name_lower = name.lower()
+    for entity_id, meta in graph.entities.items():
+        for alias in meta.aliases:
+            alias_lower = alias.lower()
+            if alias_lower in name_lower or name_lower in alias_lower:
+                return Resolution(status="resolved", entity_id=entity_id)
+        # Also check title
+        if meta.title.lower() in name_lower or name_lower in meta.title.lower():
+            return Resolution(status="resolved", entity_id=entity_id)
+
+    # 3. FAISS similarity search (if available)
+    if faiss_search_fn is not None:
+        try:
+            similar = faiss_search_fn(name, top_k=3, threshold=0.85)
+            if similar:
+                candidates = [s["entity_id"] for s in similar if "entity_id" in s]
+                if candidates:
+                    return Resolution(status="ambiguous", candidates=candidates)
+        except Exception:
+            pass  # FAISS not available, skip
+
+    # 4. New entity
+    return Resolution(status="new", suggested_slug=slug)
+
+
+def resolve_all(
+    raw_extraction: RawExtraction,
+    graph: GraphData,
+    faiss_search_fn: Optional[Callable] = None,
+) -> ResolvedExtraction:
+    """Resolve all entities from a raw extraction."""
+    resolved_entities = []
+
+    for entity in raw_extraction.entities:
+        resolution = resolve_entity(entity.name, graph, faiss_search_fn)
+        resolved_entities.append(ResolvedEntity(raw=entity, resolution=resolution))
+
+    return ResolvedExtraction(
+        resolved=resolved_entities,
+        relations=raw_extraction.relations,
+        summary=raw_extraction.summary,
+    )

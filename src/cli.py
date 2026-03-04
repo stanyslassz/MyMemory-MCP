@@ -1,0 +1,298 @@
+"""CLI for memory-ai. All commands use Click."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+
+import click
+from rich.console import Console
+from rich.table import Table
+
+from src.core.config import load_config
+
+console = Console()
+logger = logging.getLogger("memory-ai")
+
+
+def _setup_logging(verbose: bool = False):
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+
+
+@click.group()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+@click.option("--config", "-c", "config_path", default=None, help="Path to config.yaml")
+@click.pass_context
+def cli(ctx, verbose, config_path):
+    """memory-ai — Personal persistent memory system for LLMs."""
+    _setup_logging(verbose)
+    ctx.ensure_object(dict)
+    project_root = Path.cwd()
+    ctx.obj["config"] = load_config(config_path=config_path, project_root=project_root)
+
+
+@cli.command()
+@click.pass_context
+def run(ctx):
+    """Process all pending chats → extraction → enrichment → context → FAISS."""
+    config = ctx.obj["config"]
+    memory_path = config.memory_path
+
+    from src.memory.store import list_unprocessed_chats, get_chat_content, mark_chat_processed
+    from src.memory.graph import load_graph
+    from src.pipeline.extractor import extract_from_chat
+    from src.pipeline.resolver import resolve_all
+    from src.pipeline.arbitrator import arbitrate_entity
+    from src.pipeline.enricher import enrich_memory
+    from src.pipeline.indexer import incremental_update
+    from src.memory.context import build_context_input, write_context
+    from src.core.models import Resolution
+
+    chats = list_unprocessed_chats(memory_path)
+    if not chats:
+        console.print("[yellow]No pending chats to process.[/yellow]")
+        return
+
+    max_chats = config.job_max_chats_per_run
+    chats = chats[:max_chats]
+    console.print(f"[bold]Processing {len(chats)} pending chat(s)...[/bold]")
+
+    for chat_path in chats:
+        console.print(f"\n[cyan]→ {chat_path.name}[/cyan]")
+
+        # Step 1: Extract
+        content = get_chat_content(chat_path)
+        if not content.strip():
+            console.print("  [dim]Empty chat, skipping[/dim]")
+            mark_chat_processed(chat_path, [], [])
+            continue
+
+        try:
+            extraction = extract_from_chat(content, config)
+            console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")
+        except Exception as e:
+            console.print(f"  [red]Extraction failed: {e}[/red]")
+            continue
+
+        # Step 2: Resolve
+        graph = load_graph(memory_path)
+        resolved = resolve_all(extraction, graph)
+
+        # Step 3: Arbitrate ambiguous
+        for item in resolved.resolved:
+            if item.resolution.status == "ambiguous":
+                try:
+                    arb_result = arbitrate_entity(
+                        item.raw.name,
+                        extraction.summary,
+                        item.resolution.candidates,
+                        graph,
+                        config,
+                    )
+                    if arb_result.action == "existing" and arb_result.existing_id:
+                        item.resolution = Resolution(
+                            status="resolved",
+                            entity_id=arb_result.existing_id,
+                        )
+                    else:
+                        from src.pipeline.resolver import slugify
+                        item.resolution = Resolution(
+                            status="new",
+                            suggested_slug=slugify(item.raw.name),
+                        )
+                except Exception as e:
+                    console.print(f"  [yellow]Arbitration failed for {item.raw.name}: {e}[/yellow]")
+                    from src.pipeline.resolver import slugify
+                    item.resolution = Resolution(
+                        status="new",
+                        suggested_slug=slugify(item.raw.name),
+                    )
+
+        # Step 4: Enrich
+        try:
+            report = enrich_memory(resolved, config)
+            console.print(f"  Updated: {report.entities_updated}, Created: {report.entities_created}")
+            if report.errors:
+                for err in report.errors:
+                    console.print(f"  [yellow]Warning: {err}[/yellow]")
+        except Exception as e:
+            console.print(f"  [red]Enrichment failed: {e}[/red]")
+            continue
+
+        # Mark processed
+        mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
+
+    # Step 7: Generate context (once for all chats)
+    try:
+        console.print("\n[bold]Generating context...[/bold]")
+        graph = load_graph(memory_path)
+        enriched = build_context_input(graph, memory_path, config)
+        if enriched.strip():
+            context_text = f"# Memory Context\n\n{enriched}"
+            write_context(memory_path, context_text)
+            console.print("  [green]_context.md updated[/green]")
+        else:
+            console.print("  [dim]No entities for context[/dim]")
+    except Exception as e:
+        console.print(f"  [yellow]Context generation warning: {e}[/yellow]")
+
+    # Step 8: FAISS indexing
+    try:
+        console.print("[bold]Updating FAISS index...[/bold]")
+        incremental_update(memory_path, config)
+        console.print("  [green]FAISS index updated[/green]")
+    except Exception as e:
+        console.print(f"  [yellow]FAISS indexing warning: {e}[/yellow]")
+
+    console.print("\n[bold green]✓ Pipeline complete[/bold green]")
+
+
+@cli.command("rebuild-graph")
+@click.pass_context
+def rebuild_graph(ctx):
+    """Rebuild _graph.json from all MD files."""
+    config = ctx.obj["config"]
+    from src.memory.graph import rebuild_from_md, save_graph
+
+    console.print("[bold]Rebuilding graph from MD files...[/bold]")
+    graph = rebuild_from_md(config.memory_path)
+    save_graph(config.memory_path, graph)
+    console.print(f"[green]✓ Graph rebuilt: {len(graph.entities)} entities, {len(graph.relations)} relations[/green]")
+
+
+@cli.command("rebuild-faiss")
+@click.pass_context
+def rebuild_faiss(ctx):
+    """Full FAISS index rebuild."""
+    config = ctx.obj["config"]
+    from src.pipeline.indexer import build_index
+
+    console.print("[bold]Rebuilding FAISS index...[/bold]")
+    manifest = build_index(config.memory_path, config)
+    n_files = len(manifest.get("indexed_files", {}))
+    console.print(f"[green]✓ FAISS rebuilt: {n_files} files indexed[/green]")
+
+
+@cli.command("rebuild-all")
+@click.pass_context
+def rebuild_all(ctx):
+    """Rebuild graph + context + FAISS."""
+    config = ctx.obj["config"]
+    from src.memory.graph import rebuild_from_md, save_graph
+    from src.memory.context import build_context_input, write_context, write_index
+    from src.memory.scoring import recalculate_all_scores
+    from src.pipeline.indexer import build_index
+
+    console.print("[bold]Rebuilding everything...[/bold]")
+
+    # Graph
+    graph = rebuild_from_md(config.memory_path)
+    graph = recalculate_all_scores(graph, config)
+    save_graph(config.memory_path, graph)
+    console.print(f"  Graph: {len(graph.entities)} entities, {len(graph.relations)} relations")
+
+    # Index
+    write_index(config.memory_path, graph)
+    console.print("  _index.md updated")
+
+    # Context
+    enriched = build_context_input(graph, config.memory_path, config)
+    if enriched.strip():
+        write_context(config.memory_path, f"# Memory Context\n\n{enriched}")
+        console.print("  _context.md updated")
+
+    # FAISS
+    manifest = build_index(config.memory_path, config)
+    console.print(f"  FAISS: {len(manifest.get('indexed_files', {}))} files indexed")
+
+    console.print("[bold green]✓ Full rebuild complete[/bold green]")
+
+
+@cli.command()
+@click.pass_context
+def validate(ctx):
+    """Check graph consistency (orphan relations, missing files)."""
+    config = ctx.obj["config"]
+    from src.memory.graph import load_graph, validate_graph
+
+    graph = load_graph(config.memory_path)
+    warnings = validate_graph(graph, config.memory_path)
+
+    if not warnings:
+        console.print("[green]✓ Graph is consistent[/green]")
+    else:
+        console.print(f"[yellow]Found {len(warnings)} warning(s):[/yellow]")
+        for w in warnings:
+            console.print(f"  ⚠ {w}")
+
+
+@cli.command()
+@click.pass_context
+def stats(ctx):
+    """Display memory metrics."""
+    config = ctx.obj["config"]
+    from src.memory.graph import load_graph
+    from src.memory.store import list_unprocessed_chats, list_entities
+
+    graph = load_graph(config.memory_path)
+    unprocessed = list_unprocessed_chats(config.memory_path)
+    entities = list_entities(config.memory_path)
+
+    # Summary table
+    table = Table(title="memory-ai Statistics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total entities (graph)", str(len(graph.entities)))
+    table.add_row("Total entities (files)", str(len(entities)))
+    table.add_row("Total relations", str(len(graph.relations)))
+    table.add_row("Pending chats", str(len(unprocessed)))
+
+    # Count by type
+    type_counts: dict[str, int] = {}
+    for _, entity in graph.entities.items():
+        type_counts[entity.type] = type_counts.get(entity.type, 0) + 1
+
+    for t, c in sorted(type_counts.items()):
+        table.add_row(f"  └ {t}", str(c))
+
+    # Context/index status
+    context_exists = (config.memory_path / "_context.md").exists()
+    index_exists = (config.memory_path / "_index.md").exists()
+    faiss_exists = Path(config.faiss.index_path).exists()
+
+    table.add_row("_context.md", "✓" if context_exists else "✗")
+    table.add_row("_index.md", "✓" if index_exists else "✗")
+    table.add_row("FAISS index", "✓" if faiss_exists else "✗")
+
+    console.print(table)
+
+
+@cli.command()
+@click.pass_context
+def inbox(ctx):
+    """Process files in _inbox/."""
+    config = ctx.obj["config"]
+    from src.pipeline.inbox import process_inbox
+
+    processed = process_inbox(config.memory_path, config)
+    if processed:
+        console.print(f"[green]✓ Processed {len(processed)} file(s): {', '.join(processed)}[/green]")
+        console.print("[dim]Run 'memory run' to extract and enrich from these chats.[/dim]")
+    else:
+        console.print("[yellow]No files to process in _inbox/[/yellow]")
+
+
+@cli.command()
+@click.pass_context
+def serve(ctx):
+    """Start the MCP server."""
+    from src.mcp.server import run_server
+    console.print("[bold]Starting MCP server...[/bold]")
+    run_server()
+
+
+if __name__ == "__main__":
+    cli()

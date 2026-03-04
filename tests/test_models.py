@@ -1,0 +1,126 @@
+"""Tests for core/models.py."""
+
+import json
+
+from pydantic import ValidationError
+import pytest
+
+from src.core.models import (
+    EntityFrontmatter,
+    EntityResolution,
+    GraphData,
+    GraphEntity,
+    GraphRelation,
+    RawEntity,
+    RawExtraction,
+    RawObservation,
+    RawRelation,
+    Resolution,
+)
+
+
+def test_raw_observation_valid():
+    obs = RawObservation(category="fait", content="Test fact", importance=0.5, tags=["test"])
+    assert obs.category == "fait"
+    assert obs.importance == 0.5
+
+
+def test_raw_observation_invalid_category():
+    with pytest.raises(ValidationError):
+        RawObservation(category="invalid_cat", content="Test", importance=0.5)
+
+
+def test_raw_observation_importance_bounds():
+    with pytest.raises(ValidationError):
+        RawObservation(category="fait", content="Test", importance=1.5)
+    with pytest.raises(ValidationError):
+        RawObservation(category="fait", content="Test", importance=-0.1)
+
+
+def test_raw_extraction_roundtrip():
+    extraction = RawExtraction(
+        entities=[
+            RawEntity(
+                name="Mal de dos",
+                type="sante",
+                observations=[
+                    RawObservation(category="diagnostic", content="Sciatique", importance=0.8)
+                ],
+            )
+        ],
+        relations=[
+            RawRelation(from_name="Mal de dos", to_name="Natation", type="ameliore", context="aide")
+        ],
+        summary="Problème de dos",
+    )
+    data = extraction.model_dump()
+    restored = RawExtraction.model_validate(data)
+    assert restored.entities[0].name == "Mal de dos"
+    assert restored.relations[0].type == "ameliore"
+
+
+def test_entity_resolution():
+    res = EntityResolution(action="existing", existing_id="mal-de-dos")
+    assert res.action == "existing"
+    res2 = EntityResolution(action="new", new_type="sante")
+    assert res2.new_type == "sante"
+
+
+def test_graph_relation_alias():
+    rel = GraphRelation(from_entity="a", to_entity="b", type="affecte")
+    dumped = rel.model_dump(by_alias=True)
+    assert dumped["from"] == "a"
+    assert dumped["to"] == "b"
+
+    # Can also construct from alias
+    rel2 = GraphRelation(**{"from": "x", "to": "y", "type": "ameliore"})
+    assert rel2.from_entity == "x"
+
+
+def test_graph_data_serialization():
+    gd = GraphData(
+        generated="2026-03-03",
+        entities={
+            "test-entity": GraphEntity(
+                file="moi/test.md",
+                type="sante",
+                title="Test",
+                score=0.5,
+            )
+        },
+        relations=[GraphRelation(from_entity="a", to_entity="b", type="affecte")],
+    )
+    data = gd.model_dump(by_alias=True)
+    assert "test-entity" in data["entities"]
+    assert data["relations"][0]["from"] == "a"
+
+    # JSON roundtrip
+    json_str = json.dumps(data)
+    restored = GraphData.model_validate(json.loads(json_str))
+    assert "test-entity" in restored.entities
+
+
+def test_entity_frontmatter():
+    fm = EntityFrontmatter(
+        title="Test",
+        type="sante",
+        retention="long_term",
+        score=0.88,
+        importance=0.85,
+        frequency=38,
+        last_mentioned="2026-03-03",
+        created="2025-09-15",
+        aliases=["dos", "sciatique"],
+        tags=["santé"],
+    )
+    assert fm.retention == "long_term"
+    assert len(fm.aliases) == 2
+
+
+def test_resolution():
+    r = Resolution(status="resolved", entity_id="test-id")
+    assert r.status == "resolved"
+    r2 = Resolution(status="ambiguous", candidates=["a", "b"])
+    assert len(r2.candidates) == 2
+    r3 = Resolution(status="new", suggested_slug="new-entity")
+    assert r3.suggested_slug == "new-entity"
