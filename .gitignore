@@ -6,11 +6,21 @@
 # ── Memory data (source of truth is local, not in repo) ──
 memory/**
 
-# ── Generated / local context artifacts (explicit) ──
-memory/chats/
+# ── Generated / local context artifacts ──
 _context.md
 _index.md
-memory/_graph.json
+_graph.json
+_graph.json.bak
+_graph.lock
+_ingest_jobs.json
+
+# ── FAISS artifacts ──
+*.faiss
+*.pkl
+_faiss_manifest.json
+
+# ── Backups ──
+backups/
 
 # ── Python ──
 __pycache__/
@@ -20,3 +30,7 @@ dist/
 wheels/
 *.egg-info
 .venv/
+
+# ── Planning docs (local-only) ──
+CLAUDE_PLAN_REQUEST.md
+IMPLEMENTATION_PLAN_V2_TRUE_RAG.md
