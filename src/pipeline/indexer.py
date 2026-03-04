@@ -57,7 +57,10 @@ def _get_embedding_fn(config: Config):
         import litellm
 
         def embed(texts: list[str]) -> np.ndarray:
-            response = litellm.embedding(model=f"openai/{model_name}", input=texts)
+            kwargs: dict[str, Any] = {"model": f"openai/{model_name}", "input": texts}
+            if config.embeddings.api_base:
+                kwargs["api_base"] = config.embeddings.api_base
+            response = litellm.embedding(**kwargs)
             return np.array([d["embedding"] for d in response.data], dtype=np.float32)
 
         return embed

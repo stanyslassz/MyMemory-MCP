@@ -79,6 +79,8 @@ class Config:
     prompts_path: Path = field(default_factory=lambda: Path("./prompts"))
     categories: CategoriesConfig = field(default_factory=CategoriesConfig)
     mcp_transport: str = "stdio"
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8000
     job_schedule: str = "0 3 * * *"
     job_idle_trigger_minutes: int = 10
     job_max_chats_per_run: int = 20
@@ -170,6 +172,8 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             folders=cats.get("folders", {}),
         ),
         mcp_transport=raw.get("mcp", {}).get("transport", "stdio"),
+        mcp_host=raw.get("mcp", {}).get("host", "127.0.0.1"),
+        mcp_port=raw.get("mcp", {}).get("port", 8000),
         job_schedule=job.get("schedule", "0 3 * * *"),
         job_idle_trigger_minutes=job.get("idle_trigger_minutes", 10),
         job_max_chats_per_run=job.get("max_chats_per_run", 20),

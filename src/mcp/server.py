@@ -122,6 +122,11 @@ def run_server():
     """Start the MCP server."""
     config = _get_config()
     transport = config.mcp_transport
+
+    # Apply host/port from config for SSE transport (LAN-reachable)
+    mcp.settings.host = config.mcp_host
+    mcp.settings.port = config.mcp_port
+
     if transport == "stdio":
         mcp.run(transport="stdio")
     else:

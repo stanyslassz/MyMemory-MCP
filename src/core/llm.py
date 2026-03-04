@@ -54,9 +54,11 @@ def _get_client(step_config: LLMStepConfig) -> instructor.Instructor:
     if step_config.api_base:
         kwargs["api_base"] = step_config.api_base
 
+    # Use MD_JSON mode: extracts JSON from markdown code blocks.
+    # Avoids response_format param that LM Studio models (e.g. gpt-oss-20b) don't support.
     client = instructor.from_litellm(
         litellm.completion,
-        mode=instructor.Mode.JSON,
+        mode=instructor.Mode.MD_JSON,
     )
     return client
 
