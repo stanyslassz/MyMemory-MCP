@@ -1,40 +1,35 @@
-# ═══════════════════════════════════════════════════════════════
-# memory-ai — Main configuration
-# ═══════════════════════════════════════════════════════════════
-
-user_language: "fr"
-
+user_language: fr
 llm:
   extraction:
-    model: "ollama/llama3.1:8b"
+    model: openai/gpt-oss-20b
     temperature: 0
     max_retries: 3
     timeout: 60
-
+    api_base: http://192.168.0.78:1234/v1
   arbitration:
-    model: "ollama/llama3.1:8b"
+    model: openai/gpt-oss-20b
     temperature: 0
     max_retries: 2
     timeout: 30
-
+    api_base: http://192.168.0.78:1234/v1
   context:
-    model: "ollama/llama3.1:8b"
+    model: openai/gpt-oss-20b
     temperature: 0.3
     max_retries: 2
     timeout: 60
-
+    api_base: http://192.168.0.78:1234/v1
   consolidation:
-    model: "ollama/llama3.1:8b"
+    model: openai/gpt-oss-20b
     temperature: 0.1
-
+    api_base: http://192.168.0.78:1234/v1
 embeddings:
-  provider: "sentence-transformers"
-  model: "all-MiniLM-L6-v2"
+  provider: openai
+  model: text-embedding-nomic-embed-text-v1.5
   chunk_size: 400
   chunk_overlap: 80
-
+  api_base: http://192.168.0.78:1234/v1
 memory:
-  path: "./memory"
+  path: ./memory
   context_max_tokens: 3000
   context_budget:
     identite: 10
@@ -45,7 +40,6 @@ memory:
     projets: 10
     instructions_ia: 15
     proches: 5
-
 scoring:
   weight_importance: 0.4
   weight_frequency: 0.3
@@ -53,72 +47,64 @@ scoring:
   frequency_cap: 20
   recency_halflife_days: 30
   min_score_for_context: 0.3
-
 job:
-  schedule: "0 3 * * *"
+  schedule: 0 3 * * *
   idle_trigger_minutes: 10
   max_chats_per_run: 20
-
 faiss:
-  index_path: "./memory/_memory.faiss"
-  mapping_path: "./memory/_memory.pkl"
-  manifest_path: "./memory/_faiss_manifest.json"
+  index_path: ./memory/_memory.faiss
+  mapping_path: ./memory/_memory.pkl
+  manifest_path: ./memory/_faiss_manifest.json
   top_k: 5
-
 mcp:
-  transport: "stdio"
-
+  transport: sse
 prompts:
-  path: "./prompts"
-
+  path: ./prompts
 categories:
   observations:
-    - fait
-    - preference
-    - diagnostic
-    - traitement
-    - progression
-    - technique
-    - vigilance
-    - decision
-    - emotion
-    - relation_interpersonnelle
-    - competence
-    - projet
-    - contexte
-    - regle
-
+  - fait
+  - preference
+  - diagnostic
+  - traitement
+  - progression
+  - technique
+  - vigilance
+  - decision
+  - emotion
+  - relation_interpersonnelle
+  - competence
+  - projet
+  - contexte
+  - regle
   entity_types:
-    - personne
-    - sante
-    - travail
-    - projet
-    - interet
-    - lieu
-    - animal
-    - organisation
-
+  - personne
+  - sante
+  - travail
+  - projet
+  - interet
+  - lieu
+  - animal
+  - organisation
   relation_types:
-    - affecte
-    - ameliore
-    - aggrave
-    - necessite
-    - lie_a
-    - vit_avec
-    - travaille_a
-    - parent_de
-    - ami_de
-    - utilise
-    - fait_partie_de
-    - contraste_avec
-    - precede
-
+  - affecte
+  - ameliore
+  - aggrave
+  - necessite
+  - lie_a
+  - vit_avec
+  - travaille_a
+  - parent_de
+  - ami_de
+  - utilise
+  - fait_partie_de
+  - contraste_avec
+  - precede
   folders:
-    personne: "proches"
-    sante: "moi"
-    travail: "travail"
-    projet: "projets"
-    interet: "interets"
-    lieu: "interets"
-    animal: "proches"
-    organisation: "travail"
+    personne: proches
+    sante: moi
+    travail: travail
+    projet: projets
+    interet: interets
+    lieu: interets
+    animal: proches
+    organisation: travail
