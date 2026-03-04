@@ -147,7 +147,7 @@ class SearchResult(BaseModel):
 
 # ── P1.1: Router decision ───────────────────────────────────
 
-RouteType = Literal["conversation", "document", "uncertain"]
+RouteType = Literal["conversation", "document", "uncertain", "fallback_doc_ingest"]
 
 
 class RouteDecision(BaseModel):
