@@ -62,6 +62,12 @@ mcp:
   port: 8765
 prompts:
   path: ./prompts
+features:
+  doc_pipeline: true
+ingest:
+  recovery_threshold_seconds: 300
+  max_retries: 3
+  jobs_path: ./memory/_ingest_jobs.json
 categories:
   observations:
   - fait

@@ -143,3 +143,44 @@ class SearchResult(BaseModel):
     chunk: str
     score: float
     relations: list[dict] = Field(default_factory=list)
+
+
+# ── P1.1: Router decision ───────────────────────────────────
+
+RouteType = Literal["conversation", "document", "uncertain"]
+
+
+class RouteDecision(BaseModel):
+    route: RouteType
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list)
+
+
+# ── P1.1: Ingest key + job state ────────────────────────────
+
+IngestJobStatus = Literal["pending", "running", "succeeded", "failed", "retriable"]
+
+CHUNK_POLICY_VERSION = "v1"
+
+
+class IngestKey(BaseModel):
+    source_id: str
+    content_hash: str
+    chunk_policy_version: str = CHUNK_POLICY_VERSION
+
+    @property
+    def canonical(self) -> str:
+        return f"{self.source_id}::{self.content_hash}::{self.chunk_policy_version}"
+
+
+class IngestJob(BaseModel):
+    job_id: str
+    ingest_key: IngestKey
+    status: IngestJobStatus = "pending"
+    retries: int = 0
+    max_retries: int = 3
+    created: str = ""
+    updated: str = ""
+    error: Optional[str] = None
+    chunks_indexed: int = 0
+    route: Optional[RouteType] = None

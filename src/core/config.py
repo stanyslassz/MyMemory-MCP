@@ -64,6 +64,18 @@ class CategoriesConfig:
 
 
 @dataclass
+class FeaturesConfig:
+    doc_pipeline: bool = False
+
+
+@dataclass
+class IngestConfig:
+    recovery_threshold_seconds: int = 300
+    max_retries: int = 3
+    jobs_path: str = "./_ingest_jobs.json"
+
+
+@dataclass
 class Config:
     user_language: str = "fr"
     llm_extraction: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
@@ -85,6 +97,8 @@ class Config:
     job_idle_trigger_minutes: int = 10
     job_max_chats_per_run: int = 20
     project_root: Path = field(default_factory=lambda: Path("."))
+    features: FeaturesConfig = field(default_factory=FeaturesConfig)
+    ingest: IngestConfig = field(default_factory=IngestConfig)
 
     def get_folder_for_type(self, entity_type: str) -> str:
         """Return the memory subfolder for an entity type."""
@@ -130,6 +144,8 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     faiss_cfg = raw.get("faiss", {})
     cats = raw.get("categories", {})
     job = raw.get("job", {})
+    feat = raw.get("features", {})
+    ingest_cfg = raw.get("ingest", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -178,4 +194,12 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         job_idle_trigger_minutes=job.get("idle_trigger_minutes", 10),
         job_max_chats_per_run=job.get("max_chats_per_run", 20),
         project_root=project_root,
+        features=FeaturesConfig(
+            doc_pipeline=feat.get("doc_pipeline", False),
+        ),
+        ingest=IngestConfig(
+            recovery_threshold_seconds=ingest_cfg.get("recovery_threshold_seconds", 300),
+            max_retries=ingest_cfg.get("max_retries", 3),
+            jobs_path=str(_resolve_path(project_root, ingest_cfg.get("jobs_path", "./memory/_ingest_jobs.json"))),
+        ),
     )

@@ -118,10 +118,20 @@ def search_rag(query: str) -> dict:
     }
 
 
-def run_server():
-    """Start the MCP server."""
-    config = _get_config()
-    transport = config.mcp_transport
+def run_server(config=None, transport_override: str | None = None):
+    """Start the MCP server.
+
+    Args:
+        config: Pre-loaded Config instance (honors CLI --config). Falls back to _get_config().
+        transport_override: Override transport from CLI --transport flag. If None, uses config.
+    """
+    if config is not None:
+        global _config
+        _config = config
+    else:
+        config = _get_config()
+
+    transport = transport_override or config.mcp_transport
 
     # Apply host/port from config for SSE transport (LAN-reachable)
     mcp.settings.host = config.mcp_host

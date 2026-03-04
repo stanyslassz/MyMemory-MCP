@@ -301,12 +301,20 @@ def inbox(ctx):
 
 
 @cli.command()
+@click.option(
+    "--transport", "-t",
+    type=click.Choice(["stdio", "sse"], case_sensitive=False),
+    default=None,
+    help="Transport mode (overrides config.yaml). Default: from config.",
+)
 @click.pass_context
-def serve(ctx):
+def serve(ctx, transport):
     """Start the MCP server."""
     from src.mcp.server import run_server
-    console.print("[bold]Starting MCP server...[/bold]")
-    run_server()
+    config = ctx.obj["config"]
+    effective = transport or config.mcp_transport
+    console.print(f"[bold]Starting MCP server (transport={effective})...[/bold]")
+    run_server(config=config, transport_override=transport)
 
 
 def _is_timeout_error(exc: Exception) -> bool:

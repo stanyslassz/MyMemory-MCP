@@ -101,6 +101,8 @@ def _make_config(tmp_path):
     config.faiss.index_path = str(tmp_path / "_memory.faiss")
     config.faiss.mapping_path = str(tmp_path / "_memory.pkl")
     config.faiss.manifest_path = str(tmp_path / "_faiss_manifest.json")
+    # Legacy E2E tests use conversation pipeline only
+    config.features.doc_pipeline = False
     return config
 
 
