@@ -95,12 +95,22 @@ def update_entity(graph: GraphData, entity_id: str, **updates) -> GraphData:
 
 
 def add_relation(graph: GraphData, relation: GraphRelation) -> GraphData:
-    """Add a relation, skipping duplicates (same from+to+type)."""
+    """Add a relation, or reinforce existing duplicate (same from+to+type)."""
     for existing in graph.relations:
         if (existing.from_entity == relation.from_entity
                 and existing.to_entity == relation.to_entity
                 and existing.type == relation.type):
-            return graph  # duplicate
+            # Reinforce existing relation
+            existing.mention_count += 1
+            existing.last_reinforced = datetime.now().isoformat()
+            if relation.context and not existing.context:
+                existing.context = relation.context
+            return graph
+    # New relation
+    if not relation.created:
+        relation.created = datetime.now().isoformat()
+    if not relation.last_reinforced:
+        relation.last_reinforced = relation.created
     graph.relations.append(relation)
     return graph
 

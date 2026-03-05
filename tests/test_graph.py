@@ -183,6 +183,26 @@ def test_save_graph_is_atomic(tmp_path):
     assert "x" in data["entities"]
 
 
+def test_add_relation_reinforces_existing():
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(file="self/a.md", type="health", title="A")
+    graph.entities["b"] = GraphEntity(file="self/b.md", type="health", title="B")
+
+    rel1 = GraphRelation(from_entity="a", to_entity="b", type="affects",
+                         strength=0.5, mention_count=1, created="2026-01-01")
+    add_relation(graph, rel1)
+    assert len(graph.relations) == 1
+    assert graph.relations[0].mention_count == 1
+
+    rel2 = GraphRelation(from_entity="a", to_entity="b", type="affects",
+                         context="new context")
+    add_relation(graph, rel2)
+    assert len(graph.relations) == 1  # Still 1, not duplicated
+    assert graph.relations[0].mention_count == 2  # Reinforced
+    assert graph.relations[0].context == "new context"
+    assert graph.relations[0].last_reinforced != ""
+
+
 def test_rebuild_from_md(tmp_path):
     # Create entity MD files
     fm1 = EntityFrontmatter(
