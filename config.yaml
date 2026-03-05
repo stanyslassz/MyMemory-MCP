@@ -41,12 +41,22 @@ memory:
     ai_instructions: 15
     close_ones: 5
 scoring:
+  model: act_r
+  decay_factor: 0.5
+  decay_factor_short_term: 0.8
+  importance_weight: 0.3
+  spreading_weight: 0.2
+  permanent_min_score: 0.5
+  relation_strength_base: 0.5
+  relation_decay_halflife: 180
+  window_size: 50
+  min_score_for_context: 0.3
+  # Legacy (used until Phase 2 replaces scoring.py)
   weight_importance: 0.4
   weight_frequency: 0.3
   weight_recency: 0.3
   frequency_cap: 20
   recency_halflife_days: 30
-  min_score_for_context: 0.3
 job:
   schedule: 0 3 * * *
   idle_trigger_minutes: 10

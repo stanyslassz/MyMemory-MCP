@@ -89,3 +89,17 @@ def test_load_real_config():
     assert len(config.categories.observations) == 14
     assert len(config.categories.entity_types) == 8
     assert len(config.categories.relation_types) == 13
+
+
+def test_scoring_config_actr_fields():
+    """Verify ACT-R scoring parameters load from project config."""
+    project_root = Path(__file__).parent.parent
+    config = load_config(project_root=project_root)
+    s = config.scoring
+    assert s.model == "act_r"
+    assert s.decay_factor == 0.5
+    assert s.decay_factor_short_term == 0.8
+    assert s.importance_weight == 0.3
+    assert s.spreading_weight == 0.2
+    assert s.permanent_min_score == 0.5
+    assert s.window_size == 50

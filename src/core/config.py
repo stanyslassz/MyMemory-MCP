@@ -39,12 +39,22 @@ class EmbeddingsConfig:
 
 @dataclass
 class ScoringConfig:
+    model: str = "act_r"
+    decay_factor: float = 0.5
+    decay_factor_short_term: float = 0.8
+    importance_weight: float = 0.3
+    spreading_weight: float = 0.2
+    permanent_min_score: float = 0.5
+    relation_strength_base: float = 0.5
+    relation_decay_halflife: int = 180
+    window_size: int = 50
+    min_score_for_context: float = 0.3
+    # Legacy fields (used until Phase 2 replaces scoring.py)
     weight_importance: float = 0.4
     weight_frequency: float = 0.3
     weight_recency: float = 0.3
     frequency_cap: int = 20
     recency_halflife_days: int = 30
-    min_score_for_context: float = 0.3
 
 
 @dataclass
@@ -167,12 +177,21 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         context_max_tokens=mem.get("context_max_tokens", 3000),
         context_budget=mem.get("context_budget", {}),
         scoring=ScoringConfig(
+            model=scoring.get("model", "act_r"),
+            decay_factor=scoring.get("decay_factor", 0.5),
+            decay_factor_short_term=scoring.get("decay_factor_short_term", 0.8),
+            importance_weight=scoring.get("importance_weight", 0.3),
+            spreading_weight=scoring.get("spreading_weight", 0.2),
+            permanent_min_score=scoring.get("permanent_min_score", 0.5),
+            relation_strength_base=scoring.get("relation_strength_base", 0.5),
+            relation_decay_halflife=scoring.get("relation_decay_halflife", 180),
+            window_size=scoring.get("window_size", 50),
+            min_score_for_context=scoring.get("min_score_for_context", 0.3),
             weight_importance=scoring.get("weight_importance", 0.4),
             weight_frequency=scoring.get("weight_frequency", 0.3),
             weight_recency=scoring.get("weight_recency", 0.3),
             frequency_cap=scoring.get("frequency_cap", 20),
             recency_halflife_days=scoring.get("recency_halflife_days", 30),
-            min_score_for_context=scoring.get("min_score_for_context", 0.3),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),
