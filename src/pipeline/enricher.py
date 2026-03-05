@@ -81,7 +81,7 @@ def enrich_memory(
                     ))
 
             if from_slug and to_slug:
-                graph_rel = GraphRelation(from_entity=from_slug, to_entity=to_slug, type=rel.type)
+                graph_rel = GraphRelation(from_entity=from_slug, to_entity=to_slug, type=rel.type, context=rel.context)
                 graph = add_relation(graph, graph_rel)
                 report.relations_added += 1
 
@@ -135,6 +135,13 @@ def _update_existing_entity(
     # Update graph metadata
     entity_meta.frequency += 1
     entity_meta.last_mentioned = today
+
+    # Update mention_dates (windowed)
+    from src.memory.mentions import add_mention
+    entity_meta.mention_dates, entity_meta.monthly_buckets = add_mention(
+        today, entity_meta.mention_dates, entity_meta.monthly_buckets,
+        window_size=50,
+    )
 
     # Update importance (running average)
     if raw_entity.observations:
@@ -194,6 +201,8 @@ def _create_new_entity(
         importance=avg_importance,
         frequency=1,
         last_mentioned=today,
+        created=today,
+        mention_dates=[today],
         retention="short_term",
         aliases=[],
         tags=fm.tags,
