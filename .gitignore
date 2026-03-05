@@ -1,7 +1,9 @@
-# ── Secrets ──
+# ── Secrets & local config ──
 .env
 .env.*
 !.env.example
+config.yaml
+!config.yaml.example
 
 # ── Memory data (source of truth is local, not in repo) ──
 memory/**

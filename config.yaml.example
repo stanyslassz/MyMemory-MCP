@@ -1,0 +1,160 @@
+# ═══════════════════════════════════════════════════════════════
+# memory-ai configuration
+# Copy this file to config.yaml and adjust to your setup.
+# ═══════════════════════════════════════════════════════════════
+
+user_language: fr  # Content language (prompts adapt to this)
+
+# ── LLM providers ──────────────────────────────────────────────
+# Each pipeline step can use a different model/endpoint.
+# Supported prefixes: ollama/, openai/, anthropic/, openrouter/
+# For local servers (LM Studio, vLLM, etc.) use openai/ prefix + api_base.
+llm:
+  extraction:
+    model: ollama/llama3.1:8b       # or openai/gpt-4o-mini, anthropic/claude-sonnet-4-5-20250929
+    temperature: 0
+    max_retries: 3
+    timeout: 60
+    # api_base: http://localhost:1234/v1  # Uncomment for LM Studio / vLLM
+  arbitration:
+    model: ollama/llama3.1:8b
+    temperature: 0
+    max_retries: 2
+    timeout: 30
+  context:
+    model: ollama/llama3.1:8b
+    temperature: 0.3
+    max_retries: 2
+    timeout: 60
+  consolidation:
+    model: ollama/llama3.1:8b
+    temperature: 0.1
+
+# ── Embeddings ─────────────────────────────────────────────────
+embeddings:
+  provider: sentence-transformers   # Local, no API needed
+  model: all-MiniLM-L6-v2
+  chunk_size: 400
+  chunk_overlap: 80
+  # provider: openai               # For API-based embeddings
+  # model: text-embedding-3-small
+  # api_base: http://localhost:1234/v1  # For LM Studio embeddings
+
+# ── Memory storage ─────────────────────────────────────────────
+memory:
+  path: ./memory
+  context_max_tokens: 3000
+  context_budget:
+    identity: 10
+    top_of_mind: 25
+    vigilances: 15
+    boost: 10
+    work: 10
+    projects: 10
+    ai_instructions: 15
+    close_ones: 5
+
+# ── ACT-R Scoring ──────────────────────────────────────────────
+scoring:
+  model: act_r
+  decay_factor: 0.5              # Standard ACT-R decay
+  decay_factor_short_term: 0.8   # Faster decay for short-term memories
+  importance_weight: 0.3         # Weight of LLM-assessed importance
+  spreading_weight: 0.2          # Weight of spreading activation bonus
+  permanent_min_score: 0.5       # Floor score for permanent entities
+  relation_strength_base: 0.5    # Initial relation strength
+  relation_decay_halflife: 180   # Days for unreinforced relations to halve
+  window_size: 50                # Recent mention dates to keep precisely
+  min_score_for_context: 0.3     # Minimum score to appear in context
+
+# ── Background job ─────────────────────────────────────────────
+job:
+  schedule: "0 3 * * *"          # Cron expression for scheduled runs
+  idle_trigger_minutes: 10
+  max_chats_per_run: 20
+
+# ── FAISS vector index ─────────────────────────────────────────
+faiss:
+  index_path: ./memory/_memory.faiss
+  mapping_path: ./memory/_memory.pkl
+  manifest_path: ./memory/_faiss_manifest.json
+  top_k: 5
+
+# ── MCP server ─────────────────────────────────────────────────
+mcp:
+  transport: stdio               # stdio (default) or sse
+  host: 0.0.0.0                  # SSE bind address (only when transport=sse)
+  port: 8765                     # SSE port (only when transport=sse)
+
+# ── Prompts ────────────────────────────────────────────────────
+prompts:
+  path: ./prompts
+
+# ── Features ───────────────────────────────────────────────────
+features:
+  doc_pipeline: true             # Enable document ingestion pipeline
+
+# ── NLP pre-filter (optional) ──────────────────────────────────
+# Requires: python -m spacy download fr_core_news_sm
+nlp:
+  enabled: true
+  model: fr_core_news_sm
+  dedup_threshold: 0.85          # Similarity threshold for observation dedup
+  date_extraction: true          # Extract dates from French text
+  pre_ner: true                  # Detect proper nouns as resolver hints
+
+# ── Ingest recovery ───────────────────────────────────────────
+ingest:
+  recovery_threshold_seconds: 300
+  max_retries: 3
+  jobs_path: ./memory/_ingest_jobs.json
+
+# ── Categories ─────────────────────────────────────────────────
+categories:
+  observations:
+    - fact
+    - preference
+    - diagnosis
+    - treatment
+    - progression
+    - technique
+    - vigilance
+    - decision
+    - emotion
+    - interpersonal
+    - skill
+    - project
+    - context
+    - rule
+  entity_types:
+    - person
+    - health
+    - work
+    - project
+    - interest
+    - place
+    - animal
+    - organization
+  relation_types:
+    - affects
+    - improves
+    - worsens
+    - requires
+    - linked_to
+    - lives_with
+    - works_at
+    - parent_of
+    - friend_of
+    - uses
+    - part_of
+    - contrasts_with
+    - precedes
+  folders:
+    person: close_ones
+    health: self
+    work: work
+    project: projects
+    interest: interests
+    place: interests
+    animal: close_ones
+    organization: work
