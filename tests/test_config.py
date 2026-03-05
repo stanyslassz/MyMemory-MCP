@@ -31,7 +31,7 @@ memory:
   path: "./memory"
   context_max_tokens: 3000
   context_budget:
-    identite: 10
+    identity: 10
     top_of_mind: 25
 scoring:
   weight_importance: 0.4
@@ -39,12 +39,12 @@ scoring:
   weight_recency: 0.3
   frequency_cap: 20
 categories:
-  observations: [fait, preference]
-  entity_types: [personne, sante]
-  relation_types: [affecte, ameliore]
+  observations: [fact, preference]
+  entity_types: [person, health]
+  relation_types: [affects, improves]
   folders:
-    personne: proches
-    sante: moi
+    person: close_ones
+    health: self
 prompts:
   path: "./prompts"
 """)
@@ -54,9 +54,9 @@ prompts:
     assert config.llm_extraction.model == "openai/gpt-4o-mini"
     assert config.llm_extraction.temperature == 0
     assert config.scoring.weight_importance == 0.4
-    assert config.categories.observations == ["fait", "preference"]
-    assert config.categories.folders["personne"] == "proches"
-    assert config.context_budget["identite"] == 10
+    assert config.categories.observations == ["fact", "preference"]
+    assert config.categories.folders["person"] == "close_ones"
+    assert config.context_budget["identity"] == 10
 
 
 def test_load_config_defaults(tmp_path):
@@ -72,20 +72,20 @@ def test_get_folder_for_type(tmp_path):
     config_yaml.write_text("""
 categories:
   folders:
-    personne: proches
-    sante: moi
+    person: close_ones
+    health: self
 """)
     config = load_config(config_path=config_yaml, project_root=tmp_path)
-    assert config.get_folder_for_type("personne") == "proches"
-    assert config.get_folder_for_type("sante") == "moi"
-    assert config.get_folder_for_type("unknown") == "interets"  # default fallback
+    assert config.get_folder_for_type("person") == "close_ones"
+    assert config.get_folder_for_type("health") == "self"
+    assert config.get_folder_for_type("unknown") == "interests"  # default fallback
 
 
 def test_load_real_config():
     """Load the actual project config.yaml."""
     project_root = Path(__file__).parent.parent
     config = load_config(project_root=project_root)
-    assert config.user_language == "fr"
+    assert config.user_language in ("fr", "en")
     assert len(config.categories.observations) == 14
     assert len(config.categories.entity_types) == 8
     assert len(config.categories.relation_types) == 13

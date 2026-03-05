@@ -14,7 +14,7 @@ from src.core.models import EntityFrontmatter
 
 def init_memory_structure(memory_path: Path) -> None:
     """Create memory folder structure if missing."""
-    folders = ["moi", "proches", "projets", "travail", "interets", "chats", "_inbox/_processed"]
+    folders = ["self", "close_ones", "projects", "work", "interests", "chats", "_inbox/_processed"]
     for folder in folders:
         (memory_path / folder).mkdir(parents=True, exist_ok=True)
 
@@ -22,7 +22,7 @@ def init_memory_structure(memory_path: Path) -> None:
 def read_entity(filepath: Path) -> tuple[EntityFrontmatter, dict[str, list[str]]]:
     """Read a markdown entity file. Returns (frontmatter, sections).
 
-    Sections is a dict like {"Faits": [...lines], "Relations": [...lines], "Historique": [...lines]}.
+    Sections is a dict like {"Facts": [...lines], "Relations": [...lines], "History": [...lines]}.
     """
     text = filepath.read_text(encoding="utf-8")
     fm_data, body = _parse_frontmatter(text)
@@ -42,7 +42,7 @@ def write_entity(filepath: Path, frontmatter: EntityFrontmatter, sections: dict[
     lines = ["---\n", fm_yaml, "---\n", "\n"]
     lines.append(f"# {frontmatter.title}\n\n")
 
-    for section_name in ["Faits", "Relations", "Historique"]:
+    for section_name in ["Facts", "Relations", "History"]:
         lines.append(f"## {section_name}\n")
         items = sections.get(section_name, [])
         for item in items:
@@ -65,7 +65,7 @@ def update_entity(
 
     # Add new observations (avoid duplicates: same category + similar content)
     if new_observations:
-        existing_facts = sections.get("Faits", [])
+        existing_facts = sections.get("Facts", [])
         for obs in new_observations:
             line = f"- [{obs['category']}] {obs['content']}"
             if obs.get("tags"):
@@ -76,7 +76,7 @@ def update_entity(
                         line += f" #{tag}"
             if not _is_duplicate_observation(line, existing_facts):
                 existing_facts.append(line)
-        sections["Faits"] = existing_facts
+        sections["Facts"] = existing_facts
 
     # Add new relations (avoid duplicates)
     if new_relations:
@@ -106,15 +106,15 @@ def create_entity(
     """Create a new entity MD file in the appropriate folder."""
     filepath = memory_path / folder / f"{slug}.md"
     sections: dict[str, list[str]] = {
-        "Faits": [],
+        "Facts": [],
         "Relations": [],
-        "Historique": [f"- {frontmatter.created}: Créé"],
+        "History": [f"- {frontmatter.created}: Created"],
     }
 
     if observations:
         for obs in observations:
             line = f"- [{obs['category']}] {obs['content']}"
-            sections["Faits"].append(line)
+            sections["Facts"].append(line)
 
     if relations:
         sections["Relations"] = relations
@@ -145,9 +145,9 @@ def create_stub_entity(
         tags=[],
     )
     sections = {
-        "Faits": [],
+        "Facts": [],
         "Relations": [],
-        "Historique": [f"- {today}: Created by forward reference"],
+        "History": [f"- {today}: Created by forward reference"],
     }
     filepath = memory_path / folder / f"{slug}.md"
     write_entity(filepath, fm, sections)

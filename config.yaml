@@ -32,14 +32,14 @@ memory:
   path: ./memory
   context_max_tokens: 3000
   context_budget:
-    identite: 10
+    identity: 10
     top_of_mind: 25
     vigilances: 15
     boost: 10
-    travail: 10
-    projets: 10
-    instructions_ia: 15
-    proches: 5
+    work: 10
+    projects: 10
+    ai_instructions: 15
+    close_ones: 5
 scoring:
   weight_importance: 0.4
   weight_frequency: 0.3
@@ -70,49 +70,49 @@ ingest:
   jobs_path: ./memory/_ingest_jobs.json
 categories:
   observations:
-  - fait
+  - fact
   - preference
-  - diagnostic
-  - traitement
+  - diagnosis
+  - treatment
   - progression
   - technique
   - vigilance
   - decision
   - emotion
-  - relation_interpersonnelle
-  - competence
-  - projet
-  - contexte
-  - regle
+  - interpersonal
+  - skill
+  - project
+  - context
+  - rule
   entity_types:
-  - personne
-  - sante
-  - travail
-  - projet
-  - interet
-  - lieu
+  - person
+  - health
+  - work
+  - project
+  - interest
+  - place
   - animal
-  - organisation
+  - organization
   relation_types:
-  - affecte
-  - ameliore
-  - aggrave
-  - necessite
-  - lie_a
-  - vit_avec
-  - travaille_a
-  - parent_de
-  - ami_de
-  - utilise
-  - fait_partie_de
-  - contraste_avec
-  - precede
+  - affects
+  - improves
+  - worsens
+  - requires
+  - linked_to
+  - lives_with
+  - works_at
+  - parent_of
+  - friend_of
+  - uses
+  - part_of
+  - contrasts_with
+  - precedes
   folders:
-    personne: proches
-    sante: moi
-    travail: travail
-    projet: projets
-    interet: interets
-    lieu: interets
-    animal: proches
-    organisation: travail
+    person: close_ones
+    health: self
+    work: work
+    project: projects
+    interest: interests
+    place: interests
+    animal: close_ones
+    organization: work

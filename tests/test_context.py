@@ -14,7 +14,7 @@ def _make_config(memory_path):
     config.scoring = ScoringConfig(min_score_for_context=0.0)
     config.memory_path = memory_path
     config.context_max_tokens = 3000
-    config.context_budget = {"identite": 10, "top_of_mind": 25}
+    config.context_budget = {"identity": 10, "top_of_mind": 25}
     config.user_language = "fr"
     return config
 
@@ -31,7 +31,7 @@ def test_build_context_input(tmp_path):
     )
     write_entity(
         tmp_path / "moi" / "mal-de-dos.md", fm1,
-        {"Faits": ["- [diagnosis] Sciatique chronique"], "Relations": [], "Historique": []},
+        {"Facts": ["- [diagnosis] Sciatique chronique"], "Relations": [], "History": []},
     )
 
     graph = GraphData()

@@ -85,8 +85,8 @@ def test_build_index(tmp_path):
     )
     write_entity(
         tmp_path / "moi" / "test-entity.md", fm,
-        {"Faits": ["- [fact] Test fact one", "- [diagnosis] Test diagnosis"],
-         "Relations": [], "Historique": []},
+        {"Facts": ["- [fact] Test fact one", "- [diagnosis] Test diagnosis"],
+         "Relations": [], "History": []},
     )
 
     with patch("src.pipeline.indexer._get_embedding_fn", return_value=_mock_embed):
@@ -107,8 +107,8 @@ def test_search(tmp_path):
     )
     write_entity(
         tmp_path / "interets" / "natation.md", fm,
-        {"Faits": ["- [fact] Nage trois fois par semaine"],
-         "Relations": [], "Historique": []},
+        {"Facts": ["- [fact] Nage trois fois par semaine"],
+         "Relations": [], "History": []},
     )
 
     with patch("src.pipeline.indexer._get_embedding_fn", return_value=_mock_embed):

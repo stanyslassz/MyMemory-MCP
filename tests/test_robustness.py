@@ -50,7 +50,7 @@ def test_faiss_missing_auto_rebuild_on_search(tmp_path):
     (entity_dir / "test-entity.md").write_text(
         "---\ntitle: Test Entity\ntype: health\nretention: long_term\n"
         "score: 0.5\nimportance: 0.5\nfrequency: 1\nlast_mentioned: 2026-03-03\n"
-        "created: 2026-03-03\naliases: []\ntags: []\n---\n\n# Test Entity\n\n## Faits\n- fact: A fact\n",
+        "created: 2026-03-03\naliases: []\ntags: []\n---\n\n# Test Entity\n\n## Facts\n- fact: A fact\n",
         encoding="utf-8",
     )
 

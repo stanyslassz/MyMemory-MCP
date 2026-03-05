@@ -20,7 +20,7 @@ from src.memory.store import (
 
 def test_init_memory_structure(tmp_path):
     init_memory_structure(tmp_path / "mem")
-    assert (tmp_path / "mem" / "moi").is_dir()
+    assert (tmp_path / "mem" / "self").is_dir()
     assert (tmp_path / "mem" / "chats").is_dir()
     assert (tmp_path / "mem" / "_inbox" / "_processed").is_dir()
 
@@ -39,9 +39,9 @@ def test_write_and_read_entity(tmp_path):
         tags=["tag1"],
     )
     sections = {
-        "Faits": ["- [fact] Some fact", "- [diagnosis] A diagnosis"],
+        "Facts": ["- [fact] Some fact", "- [diagnosis] A diagnosis"],
         "Relations": ["- affects [[Other]]"],
-        "Historique": ["- 2025-09: Created"],
+        "History": ["- 2025-09: Created"],
     }
     filepath = tmp_path / "moi" / "test-entity.md"
     write_entity(filepath, fm, sections)
@@ -53,7 +53,7 @@ def test_write_and_read_entity(tmp_path):
     assert fm2.type == "health"
     assert fm2.retention == "long_term"
     assert fm2.frequency == 3
-    assert len(sections2["Faits"]) == 2
+    assert len(sections2["Facts"]) == 2
     assert len(sections2["Relations"]) == 1
 
 
@@ -66,7 +66,7 @@ def test_update_entity(tmp_path):
         created="2026-01-01",
     )
     filepath = tmp_path / "interets" / "update-test.md"
-    write_entity(filepath, fm, {"Faits": ["- [fact] Old fact"], "Relations": [], "Historique": []})
+    write_entity(filepath, fm, {"Facts": ["- [fact] Old fact"], "Relations": [], "History": []})
 
     updated_fm = update_entity(
         filepath,
@@ -78,7 +78,7 @@ def test_update_entity(tmp_path):
     assert updated_fm.last_mentioned == "2026-03-03"
 
     fm3, sections3 = read_entity(filepath)
-    assert len(sections3["Faits"]) == 2
+    assert len(sections3["Facts"]) == 2
     assert len(sections3["Relations"]) == 1
 
 
@@ -96,7 +96,7 @@ def test_create_entity(tmp_path):
     assert path.exists()
     fm2, sections = read_entity(path)
     assert fm2.title == "New Entity"
-    assert len(sections["Faits"]) == 1
+    assert len(sections["Facts"]) == 1
 
 
 def test_create_stub_entity(tmp_path):
@@ -142,10 +142,10 @@ def test_get_chat_content(tmp_path):
 
 def test_list_entities(tmp_path):
     fm = EntityFrontmatter(title="E1", type="health", created="2026-01-01", last_mentioned="2026-01-01")
-    write_entity(tmp_path / "moi" / "e1.md", fm, {"Faits": [], "Relations": [], "Historique": []})
+    write_entity(tmp_path / "moi" / "e1.md", fm, {"Facts": [], "Relations": [], "History": []})
 
     fm2 = EntityFrontmatter(title="E2", type="person", created="2026-01-01", last_mentioned="2026-01-01")
-    write_entity(tmp_path / "proches" / "e2.md", fm2, {"Faits": [], "Relations": [], "Historique": []})
+    write_entity(tmp_path / "proches" / "e2.md", fm2, {"Facts": [], "Relations": [], "History": []})
 
     entities = list_entities(tmp_path)
     assert len(entities) == 2
@@ -154,8 +154,8 @@ def test_list_entities(tmp_path):
 def test_duplicate_observation_skipped(tmp_path):
     fm = EntityFrontmatter(title="Dup Test", type="health", created="2026-01-01", last_mentioned="2026-01-01")
     filepath = tmp_path / "moi" / "dup.md"
-    write_entity(filepath, fm, {"Faits": ["- [fact] Existing fact"], "Relations": [], "Historique": []})
+    write_entity(filepath, fm, {"Facts": ["- [fact] Existing fact"], "Relations": [], "History": []})
 
     update_entity(filepath, new_observations=[{"category": "fact", "content": "Existing fact", "tags": []}])
     _, sections = read_entity(filepath)
-    assert len(sections["Faits"]) == 1  # Not duplicated
+    assert len(sections["Facts"]) == 1  # Not duplicated

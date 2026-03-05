@@ -179,8 +179,8 @@ def test_e2e_full_pipeline(tmp_path):
     assert len(graph.relations) > 0
 
     # 6. Verify entity files exist in correct folders
-    assert (tmp_path / "moi").exists()
-    assert (tmp_path / "proches").exists()
+    assert (tmp_path / "self").exists()
+    assert (tmp_path / "close_ones").exists()
 
     # 7. Verify chats are now processed
     unprocessed = list_unprocessed_chats(tmp_path)

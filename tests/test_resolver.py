@@ -14,11 +14,11 @@ from src.pipeline.resolver import resolve_all, resolve_entity, slugify
 def _make_graph():
     graph = GraphData()
     graph.entities["mal-de-dos"] = GraphEntity(
-        file="moi/mal-de-dos.md", type="health", title="Mal de dos",
+        file="self/mal-de-dos.md", type="health", title="Mal de dos",
         aliases=["dos", "sciatique", "hernie"],
     )
     graph.entities["natation"] = GraphEntity(
-        file="interets/natation.md", type="interest", title="Natation",
+        file="interests/natation.md", type="interest", title="Natation",
         aliases=["nager", "piscine"],
     )
     return graph

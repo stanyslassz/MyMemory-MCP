@@ -40,7 +40,7 @@ def build_context_input(graph: GraphData, memory_path: Path, config: Config) -> 
         if entity_path.exists():
             try:
                 _, entity_sections = read_entity(entity_path)
-                facts = entity_sections.get("Faits", [])
+                facts = entity_sections.get("Facts", [])
             except Exception:
                 pass
 

@@ -159,7 +159,7 @@ def test_load_corrupt_graph_and_bak_rebuilds_from_md(tmp_path):
     write_entity(
         tmp_path / "moi" / "rebuilt-entity.md",
         fm,
-        {"Faits": ["- [fact] A fact"], "Relations": [], "Historique": []},
+        {"Facts": ["- [fact] A fact"], "Relations": [], "History": []},
     )
 
     # Write corrupt primary and backup
@@ -198,9 +198,9 @@ def test_rebuild_from_md(tmp_path):
         tmp_path / "moi" / "entity-one.md",
         fm1,
         {
-            "Faits": ["- [fact] A fact"],
+            "Facts": ["- [fact] A fact"],
             "Relations": ["- affects [[Entity Two]]"],
-            "Historique": [],
+            "History": [],
         },
     )
 
@@ -213,7 +213,7 @@ def test_rebuild_from_md(tmp_path):
     write_entity(
         tmp_path / "interets" / "entity-two.md",
         fm2,
-        {"Faits": [], "Relations": [], "Historique": []},
+        {"Facts": [], "Relations": [], "History": []},
     )
 
     graph = rebuild_from_md(tmp_path)

@@ -102,7 +102,7 @@ class Config:
 
     def get_folder_for_type(self, entity_type: str) -> str:
         """Return the memory subfolder for an entity type."""
-        return self.categories.folders.get(entity_type, "interets")
+        return self.categories.folders.get(entity_type, "interests")
 
 
 def _build_llm_step(data: dict[str, Any]) -> LLMStepConfig:

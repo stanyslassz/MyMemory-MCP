@@ -53,7 +53,7 @@ def test_enrich_new_entity(tmp_path):
     assert len(report.errors) == 0
 
     # Verify MD file was created
-    assert (tmp_path / "interets" / "yoga.md").exists()
+    assert (tmp_path / "interests" / "yoga.md").exists()
 
     # Verify graph was updated
     graph = load_graph(tmp_path)
@@ -69,14 +69,14 @@ def test_enrich_existing_entity(tmp_path):
         importance=0.6, last_mentioned="2026-01-01", created="2025-01-01",
     )
     write_entity(
-        tmp_path / "interets" / "natation.md", fm,
-        {"Faits": ["- [fact] Aime nager"], "Relations": [], "Historique": []},
+        tmp_path / "interests" / "natation.md", fm,
+        {"Facts": ["- [fact] Aime nager"], "Relations": [], "History": []},
     )
 
     # Pre-create graph
     graph = GraphData()
     graph = add_entity(graph, "natation", GraphEntity(
-        file="interets/natation.md", type="interest", title="Natation",
+        file="interests/natation.md", type="interest", title="Natation",
         frequency=5, importance=0.6, last_mentioned="2026-01-01",
     ))
     save_graph(tmp_path, graph)
@@ -103,10 +103,10 @@ def test_enrich_existing_entity(tmp_path):
 
     # Verify file was updated
     from src.memory.store import read_entity
-    fm2, sections = read_entity(tmp_path / "interets" / "natation.md")
+    fm2, sections = read_entity(tmp_path / "interests" / "natation.md")
     assert fm2.frequency == 6  # incremented
     assert fm2.last_mentioned == "2026-03-03"
-    assert len(sections["Faits"]) == 2  # original + new
+    assert len(sections["Facts"]) == 2  # original + new
 
 
 def test_enrich_with_relations(tmp_path):
@@ -118,12 +118,12 @@ def test_enrich_with_relations(tmp_path):
         last_mentioned="2026-01-01", created="2025-01-01",
     )
     write_entity(
-        tmp_path / "moi" / "mal-de-dos.md", fm,
-        {"Faits": ["- [diagnosis] Sciatique"], "Relations": [], "Historique": []},
+        tmp_path / "self" / "mal-de-dos.md", fm,
+        {"Facts": ["- [diagnosis] Sciatique"], "Relations": [], "History": []},
     )
     graph = GraphData()
     graph = add_entity(graph, "mal-de-dos", GraphEntity(
-        file="moi/mal-de-dos.md", type="health", title="Mal de dos",
+        file="self/mal-de-dos.md", type="health", title="Mal de dos",
         frequency=3, last_mentioned="2026-01-01",
     ))
     save_graph(tmp_path, graph)
