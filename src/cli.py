@@ -75,6 +75,19 @@ def run(ctx):
             mark_chat_processed(chat_path, [], [])
             continue
 
+        # NLP pre-filter (optional)
+        nlp_hints = {}
+        if config.nlp.enabled:
+            from src.pipeline.nlp_prefilter import is_available
+            if is_available():
+                from src.pipeline.nlp_prefilter import extract_dates, extract_entities
+                if config.nlp.date_extraction:
+                    nlp_hints["dates"] = extract_dates(content)
+                if config.nlp.pre_ner:
+                    nlp_hints["entities"] = extract_entities(content)
+                if nlp_hints.get("dates") or nlp_hints.get("entities"):
+                    console.print(f"  [dim]NLP: {len(nlp_hints.get('dates', []))} dates, {len(nlp_hints.get('entities', []))} entities[/dim]")
+
         try:
             extraction = extract_from_chat(content, config)
             console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")
@@ -481,6 +494,45 @@ def replay(ctx, list_only):
             console.print(f"  [red]Replay failed: {e}[/red]")
 
     console.print("\n[bold green]Replay complete.[/bold green]")
+
+
+@cli.command()
+@click.option("--dry-run", is_flag=True, help="Preview duplicates without merging")
+@click.pass_context
+def consolidate(ctx, dry_run):
+    """Detect and report duplicate entities."""
+    config = ctx.obj["config"]
+    from src.memory.graph import load_graph
+    from collections import defaultdict
+
+    graph = load_graph(config.memory_path)
+
+    # Simple name-based duplicate detection
+    name_groups = defaultdict(list)
+    for eid, entity in graph.entities.items():
+        key = entity.title.lower().strip()
+        name_groups[key].append((eid, entity))
+        for alias in entity.aliases:
+            alias_key = alias.lower().strip()
+            name_groups[alias_key].append((eid, entity))
+
+    duplicates = {k: v for k, v in name_groups.items() if len(set(eid for eid, _ in v)) > 1}
+
+    if not duplicates:
+        console.print("[green]No duplicate entities detected.[/green]")
+        return
+
+    console.print(f"[yellow]Found {len(duplicates)} potential duplicate group(s):[/yellow]")
+    for name, entities in duplicates.items():
+        unique_ids = list(set(eid for eid, _ in entities))
+        if len(unique_ids) > 1:
+            console.print(f"\n  '{name}':")
+            for eid in unique_ids:
+                e = graph.entities[eid]
+                console.print(f"    - {eid} ({e.type}, score: {e.score:.2f}, freq: {e.frequency})")
+
+    if dry_run:
+        console.print(f"\n[dim]Dry run -- no changes made. Run without --dry-run to merge.[/dim]")
 
 
 def _make_faiss_fn(config, memory_path):

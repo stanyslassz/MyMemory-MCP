@@ -86,6 +86,15 @@ class IngestConfig:
 
 
 @dataclass
+class NLPConfig:
+    enabled: bool = True
+    model: str = "fr_core_news_sm"
+    dedup_threshold: float = 0.85
+    date_extraction: bool = True
+    pre_ner: bool = True
+
+
+@dataclass
 class Config:
     user_language: str = "fr"
     llm_extraction: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
@@ -109,6 +118,7 @@ class Config:
     project_root: Path = field(default_factory=lambda: Path("."))
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
+    nlp: NLPConfig = field(default_factory=NLPConfig)
 
     def get_folder_for_type(self, entity_type: str) -> str:
         """Return the memory subfolder for an entity type."""
@@ -156,6 +166,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     job = raw.get("job", {})
     feat = raw.get("features", {})
     ingest_cfg = raw.get("ingest", {})
+    nlp_cfg = raw.get("nlp", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -220,5 +231,12 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             recovery_threshold_seconds=ingest_cfg.get("recovery_threshold_seconds", 300),
             max_retries=ingest_cfg.get("max_retries", 3),
             jobs_path=str(_resolve_path(project_root, ingest_cfg.get("jobs_path", "./memory/_ingest_jobs.json"))),
+        ),
+        nlp=NLPConfig(
+            enabled=nlp_cfg.get("enabled", True),
+            model=nlp_cfg.get("model", "fr_core_news_sm"),
+            dedup_threshold=nlp_cfg.get("dedup_threshold", 0.85),
+            date_extraction=nlp_cfg.get("date_extraction", True),
+            pre_ner=nlp_cfg.get("pre_ner", True),
         ),
     )

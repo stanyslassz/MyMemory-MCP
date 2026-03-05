@@ -74,6 +74,12 @@ prompts:
   path: ./prompts
 features:
   doc_pipeline: true
+nlp:
+  enabled: true
+  model: fr_core_news_sm
+  dedup_threshold: 0.85
+  date_extraction: true
+  pre_ner: true
 ingest:
   recovery_threshold_seconds: 300
   max_retries: 3
