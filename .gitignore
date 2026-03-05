@@ -34,3 +34,4 @@ wheels/
 # ── Planning docs (local-only) ──
 CLAUDE_PLAN_REQUEST.md
 IMPLEMENTATION_PLAN_V2_TRUE_RAG.md
+CLAUDE.md
