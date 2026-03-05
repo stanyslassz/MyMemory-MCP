@@ -241,3 +241,42 @@ def call_context_generation(enriched_data: str, config: Config) -> str:
     response = litellm.completion(**kwargs)
     text = response.choices[0].message.content or ""
     return strip_thinking(text)
+
+
+def call_entity_summary(
+    title: str,
+    entity_type: str,
+    facts: list[str],
+    relations: list[str],
+    tags: list[str],
+    config: Config,
+) -> str:
+    """Generate a 1-3 sentence summary for an entity. Returns free text."""
+    facts_str = "\n".join(f"- {f}" for f in facts) if facts else "None"
+    relations_str = "\n".join(f"- {r}" for r in relations) if relations else "None"
+    tags_str = ", ".join(tags) if tags else "None"
+
+    prompt = load_prompt(
+        "summarize_entity",
+        config,
+        entity_title=title,
+        entity_type=entity_type,
+        entity_facts=facts_str,
+        entity_relations=relations_str,
+        entity_tags=tags_str,
+    )
+
+    step_config = config.llm_context  # Reuse context LLM config
+    kwargs: dict[str, Any] = {
+        "model": step_config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": step_config.temperature,
+    }
+    if step_config.timeout:
+        kwargs["timeout"] = step_config.timeout
+    if step_config.api_base:
+        kwargs["api_base"] = step_config.api_base
+
+    response = litellm.completion(**kwargs)
+    text = response.choices[0].message.content or ""
+    return strip_thinking(text).strip()

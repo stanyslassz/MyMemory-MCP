@@ -50,7 +50,7 @@ def run(ctx):
     from src.pipeline.arbitrator import arbitrate_entity
     from src.pipeline.enricher import enrich_memory
     from src.pipeline.indexer import incremental_update
-    from src.memory.context import build_context_input, write_context
+    from src.memory.context import write_context
     from src.core.models import Resolution
 
     # Max extraction retries before falling back to doc_ingest
@@ -142,13 +142,13 @@ def run(ctx):
         # Mark processed
         mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
 
-    # Step 7: Generate context (once for all chats)
+    # Step 7: Generate context (deterministic template)
     try:
         console.print("\n[bold]Generating context...[/bold]")
         graph = load_graph(memory_path)
-        enriched = build_context_input(graph, memory_path, config)
-        if enriched.strip():
-            context_text = f"# Memory Context\n\n{enriched}"
+        from src.memory.context import build_deterministic_context
+        context_text = build_deterministic_context(graph, memory_path, config)
+        if context_text.strip():
             write_context(memory_path, context_text)
             console.print("  [green]_context.md updated[/green]")
         else:
@@ -199,7 +199,7 @@ def rebuild_all(ctx):
     """Rebuild graph + context + FAISS."""
     config = ctx.obj["config"]
     from src.memory.graph import rebuild_from_md, save_graph
-    from src.memory.context import build_context_input, write_context, write_index
+    from src.memory.context import build_deterministic_context, write_context, write_index
     from src.memory.scoring import recalculate_all_scores
     from src.pipeline.indexer import build_index
 
@@ -215,10 +215,10 @@ def rebuild_all(ctx):
     write_index(config.memory_path, graph)
     console.print("  _index.md updated")
 
-    # Context
-    enriched = build_context_input(graph, config.memory_path, config)
-    if enriched.strip():
-        write_context(config.memory_path, f"# Memory Context\n\n{enriched}")
+    # Context (deterministic template)
+    context_text = build_deterministic_context(graph, config.memory_path, config)
+    if context_text.strip():
+        write_context(config.memory_path, context_text)
         console.print("  _context.md updated")
 
     # FAISS
