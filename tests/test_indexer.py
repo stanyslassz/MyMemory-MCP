@@ -80,12 +80,12 @@ def test_build_index(tmp_path):
 
     # Create some entity files
     fm = EntityFrontmatter(
-        title="Test Entity", type="sante",
+        title="Test Entity", type="health",
         created="2026-01-01", last_mentioned="2026-03-03",
     )
     write_entity(
         tmp_path / "moi" / "test-entity.md", fm,
-        {"Faits": ["- [fait] Test fact one", "- [diagnostic] Test diagnosis"],
+        {"Faits": ["- [fact] Test fact one", "- [diagnosis] Test diagnosis"],
          "Relations": [], "Historique": []},
     )
 
@@ -102,12 +102,12 @@ def test_search(tmp_path):
     init_memory_structure(tmp_path)
 
     fm = EntityFrontmatter(
-        title="Natation", type="interet",
+        title="Natation", type="interest",
         created="2026-01-01", last_mentioned="2026-03-03",
     )
     write_entity(
         tmp_path / "interets" / "natation.md", fm,
-        {"Faits": ["- [fait] Nage trois fois par semaine"],
+        {"Faits": ["- [fact] Nage trois fois par semaine"],
          "Relations": [], "Historique": []},
     )
 

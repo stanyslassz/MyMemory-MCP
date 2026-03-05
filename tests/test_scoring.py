@@ -27,7 +27,7 @@ def _make_config(**overrides):
 def test_score_calculation_today():
     config = _make_config()
     entity = GraphEntity(
-        file="moi/test.md", type="sante", title="Test",
+        file="moi/test.md", type="health", title="Test",
         importance=0.8, frequency=10, last_mentioned="2026-03-03",
     )
     score = calculate_score(entity, config, today=date(2026, 3, 3))
@@ -41,7 +41,7 @@ def test_score_calculation_today():
 def test_score_calculation_old_entity():
     config = _make_config()
     entity = GraphEntity(
-        file="moi/test.md", type="sante", title="Test",
+        file="moi/test.md", type="health", title="Test",
         importance=0.5, frequency=5, last_mentioned="2025-12-03",
     )
     score = calculate_score(entity, config, today=date(2026, 3, 3))
@@ -55,7 +55,7 @@ def test_score_calculation_old_entity():
 def test_score_frequency_cap():
     config = _make_config()
     entity = GraphEntity(
-        file="moi/test.md", type="sante", title="Test",
+        file="moi/test.md", type="health", title="Test",
         importance=0.5, frequency=100, last_mentioned="2026-03-03",
     )
     score = calculate_score(entity, config, today=date(2026, 3, 3))
@@ -67,11 +67,11 @@ def test_recalculate_all_scores():
     config = _make_config()
     graph = GraphData()
     graph.entities["a"] = GraphEntity(
-        file="moi/a.md", type="sante", title="A",
+        file="moi/a.md", type="health", title="A",
         importance=0.9, frequency=15, last_mentioned="2026-03-03",
     )
     graph.entities["b"] = GraphEntity(
-        file="moi/b.md", type="interet", title="B",
+        file="moi/b.md", type="interest", title="B",
         importance=0.3, frequency=2, last_mentioned="2025-01-01",
     )
     graph = recalculate_all_scores(graph, config, today=date(2026, 3, 3))
@@ -81,13 +81,13 @@ def test_recalculate_all_scores():
 def test_get_top_entities():
     graph = GraphData()
     graph.entities["high"] = GraphEntity(
-        file="moi/h.md", type="sante", title="High", score=0.9,
+        file="moi/h.md", type="health", title="High", score=0.9,
     )
     graph.entities["low"] = GraphEntity(
-        file="moi/l.md", type="interet", title="Low", score=0.1,
+        file="moi/l.md", type="interest", title="Low", score=0.1,
     )
     graph.entities["perm"] = GraphEntity(
-        file="moi/p.md", type="sante", title="Permanent",
+        file="moi/p.md", type="health", title="Permanent",
         score=0.2, retention="permanent",
     )
 
@@ -100,10 +100,10 @@ def test_get_top_entities():
 def test_get_top_entities_min_score():
     graph = GraphData()
     graph.entities["high"] = GraphEntity(
-        file="moi/h.md", type="sante", title="High", score=0.9,
+        file="moi/h.md", type="health", title="High", score=0.9,
     )
     graph.entities["low"] = GraphEntity(
-        file="moi/l.md", type="interet", title="Low", score=0.1,
+        file="moi/l.md", type="interest", title="Low", score=0.1,
     )
     top = get_top_entities(graph, n=10, include_permanent=True, min_score=0.5)
     ids = [eid for eid, _ in top]

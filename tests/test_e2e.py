@@ -34,61 +34,61 @@ def _mock_extract_fixture():
         entities=[
             RawEntity(
                 name="Mal de dos",
-                type="sante",
+                type="health",
                 observations=[
-                    RawObservation(category="diagnostic", content="Sciatique qui revient", importance=0.8),
+                    RawObservation(category="diagnosis", content="Sciatique qui revient", importance=0.8),
                     RawObservation(category="vigilance", content="JAMAIS ibuprofène — allergie sévère", importance=0.95, tags=["permanent"]),
-                    RawObservation(category="traitement", content="Paracétamol prescrit par Dr Martin", importance=0.6),
+                    RawObservation(category="treatment", content="Paracétamol prescrit par Dr Martin", importance=0.6),
                 ],
             ),
             RawEntity(
                 name="Dr Martin",
-                type="personne",
+                type="person",
                 observations=[
-                    RawObservation(category="fait", content="Médecin traitant", importance=0.5),
+                    RawObservation(category="fact", content="Médecin traitant", importance=0.5),
                 ],
             ),
             RawEntity(
                 name="TechCorp",
-                type="organisation",
+                type="organization",
                 observations=[
-                    RawObservation(category="fait", content="Employeur actuel", importance=0.6),
+                    RawObservation(category="fact", content="Employeur actuel", importance=0.6),
                 ],
             ),
             RawEntity(
                 name="Projet Phoenix",
-                type="projet",
+                type="project",
                 observations=[
-                    RawObservation(category="projet", content="Migration cloud, lancement la semaine prochaine", importance=0.7),
+                    RawObservation(category="project", content="Migration cloud, lancement la semaine prochaine", importance=0.7),
                 ],
             ),
             RawEntity(
                 name="Louise",
-                type="personne",
+                type="person",
                 observations=[
-                    RawObservation(category="fait", content="Collègue, co-gère le projet Phoenix", importance=0.5),
+                    RawObservation(category="fact", content="Collègue, co-gère le projet Phoenix", importance=0.5),
                 ],
             ),
             RawEntity(
                 name="Sophie",
-                type="personne",
+                type="person",
                 observations=[
-                    RawObservation(category="relation_interpersonnelle", content="Femme de l'utilisateur", importance=0.7),
+                    RawObservation(category="interpersonal", content="Femme de l'utilisateur", importance=0.7),
                 ],
             ),
             RawEntity(
                 name="Natation",
-                type="interet",
+                type="interest",
                 observations=[
-                    RawObservation(category="fait", content="Pratique pour soulager le dos", importance=0.5),
+                    RawObservation(category="fact", content="Pratique pour soulager le dos", importance=0.5),
                 ],
             ),
         ],
         relations=[
-            RawRelation(from_name="Natation", to_name="Mal de dos", type="ameliore", context="soulage la douleur"),
-            RawRelation(from_name="Dr Martin", to_name="Mal de dos", type="ameliore", context="prescrit traitement"),
-            RawRelation(from_name="Louise", to_name="Projet Phoenix", type="fait_partie_de", context="co-gère"),
-            RawRelation(from_name="Sophie", to_name="Natation", type="lie_a", context="accompagne"),
+            RawRelation(from_name="Natation", to_name="Mal de dos", type="improves", context="soulage la douleur"),
+            RawRelation(from_name="Dr Martin", to_name="Mal de dos", type="improves", context="prescrit traitement"),
+            RawRelation(from_name="Louise", to_name="Projet Phoenix", type="part_of", context="co-gère"),
+            RawRelation(from_name="Sophie", to_name="Natation", type="linked_to", context="accompagne"),
         ],
         summary="L'utilisateur souffre de sciatique, suivi par Dr Martin. Travaille chez TechCorp, lance le projet Phoenix avec Louise. Fait de la natation avec Sophie.",
     )
@@ -204,8 +204,8 @@ def test_e2e_rebuild_from_md(tmp_path):
     # Run a mini pipeline to create entities
     mock_extraction = RawExtraction(
         entities=[
-            RawEntity(name="Test Entity", type="sante", observations=[
-                RawObservation(category="fait", content="A test fact", importance=0.5),
+            RawEntity(name="Test Entity", type="health", observations=[
+                RawObservation(category="fact", content="A test fact", importance=0.5),
             ]),
         ],
         relations=[],

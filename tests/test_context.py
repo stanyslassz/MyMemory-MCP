@@ -24,19 +24,19 @@ def test_build_context_input(tmp_path):
 
     # Create entity files
     fm1 = EntityFrontmatter(
-        title="Mal de dos", type="sante", score=0.8,
+        title="Mal de dos", type="health", score=0.8,
         importance=0.9, frequency=10,
         last_mentioned="2026-03-03", created="2025-01-01",
         tags=["santé", "douleur"],
     )
     write_entity(
         tmp_path / "moi" / "mal-de-dos.md", fm1,
-        {"Faits": ["- [diagnostic] Sciatique chronique"], "Relations": [], "Historique": []},
+        {"Faits": ["- [diagnosis] Sciatique chronique"], "Relations": [], "Historique": []},
     )
 
     graph = GraphData()
     graph.entities["mal-de-dos"] = GraphEntity(
-        file="moi/mal-de-dos.md", type="sante", title="Mal de dos",
+        file="moi/mal-de-dos.md", type="health", title="Mal de dos",
         score=0.8, importance=0.9, frequency=10,
         last_mentioned="2026-03-03", tags=["santé", "douleur"],
     )
@@ -49,20 +49,20 @@ def test_build_context_input(tmp_path):
 def test_generate_index():
     graph = GraphData(generated="2026-03-03")
     graph.entities["test"] = GraphEntity(
-        file="moi/test.md", type="sante", title="Test Entity",
+        file="moi/test.md", type="health", title="Test Entity",
         score=0.5, frequency=3, last_mentioned="2026-03-03",
     )
     graph.entities["other"] = GraphEntity(
-        file="interets/other.md", type="interet", title="Other",
+        file="interets/other.md", type="interest", title="Other",
         score=0.3, frequency=1, last_mentioned="2026-01-01",
     )
-    graph.relations.append(GraphRelation(from_entity="test", to_entity="other", type="affecte"))
+    graph.relations.append(GraphRelation(from_entity="test", to_entity="other", type="affects"))
 
     index = generate_index(graph)
     assert "Memory Index" in index
     assert "Test Entity" in index
     assert "Other" in index
-    assert "affecte" in index
+    assert "affects" in index
     assert "Total entities: 2" in index
 
 
@@ -77,7 +77,7 @@ def test_path_traversal_entity_file_blocked(tmp_path):
     graph = GraphData()
     graph.entities["evil"] = GraphEntity(
         file="../secret.txt",  # path traversal
-        type="sante",
+        type="health",
         title="Evil",
         score=0.99,
         importance=1.0,
@@ -94,7 +94,7 @@ def test_path_traversal_entity_file_blocked(tmp_path):
 def test_write_index(tmp_path):
     graph = GraphData(generated="2026-03-03")
     graph.entities["test"] = GraphEntity(
-        file="moi/test.md", type="sante", title="Test",
+        file="moi/test.md", type="health", title="Test",
         score=0.5, frequency=1, last_mentioned="2026-03-03",
     )
     write_index(tmp_path, graph)

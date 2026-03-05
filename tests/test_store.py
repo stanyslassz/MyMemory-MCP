@@ -28,7 +28,7 @@ def test_init_memory_structure(tmp_path):
 def test_write_and_read_entity(tmp_path):
     fm = EntityFrontmatter(
         title="Test Entity",
-        type="sante",
+        type="health",
         retention="long_term",
         score=0.5,
         importance=0.7,
@@ -39,8 +39,8 @@ def test_write_and_read_entity(tmp_path):
         tags=["tag1"],
     )
     sections = {
-        "Faits": ["- [fait] Some fact", "- [diagnostic] A diagnosis"],
-        "Relations": ["- affecte [[Other]]"],
+        "Faits": ["- [fact] Some fact", "- [diagnosis] A diagnosis"],
+        "Relations": ["- affects [[Other]]"],
         "Historique": ["- 2025-09: Created"],
     }
     filepath = tmp_path / "moi" / "test-entity.md"
@@ -50,7 +50,7 @@ def test_write_and_read_entity(tmp_path):
 
     fm2, sections2 = read_entity(filepath)
     assert fm2.title == "Test Entity"
-    assert fm2.type == "sante"
+    assert fm2.type == "health"
     assert fm2.retention == "long_term"
     assert fm2.frequency == 3
     assert len(sections2["Faits"]) == 2
@@ -60,18 +60,18 @@ def test_write_and_read_entity(tmp_path):
 def test_update_entity(tmp_path):
     fm = EntityFrontmatter(
         title="Update Test",
-        type="interet",
+        type="interest",
         frequency=1,
         last_mentioned="2026-01-01",
         created="2026-01-01",
     )
     filepath = tmp_path / "interets" / "update-test.md"
-    write_entity(filepath, fm, {"Faits": ["- [fait] Old fact"], "Relations": [], "Historique": []})
+    write_entity(filepath, fm, {"Faits": ["- [fact] Old fact"], "Relations": [], "Historique": []})
 
     updated_fm = update_entity(
         filepath,
-        new_observations=[{"category": "fait", "content": "New fact", "tags": []}],
-        new_relations=["- ameliore [[Something]]"],
+        new_observations=[{"category": "fact", "content": "New fact", "tags": []}],
+        new_relations=["- improves [[Something]]"],
         last_mentioned="2026-03-03",
     )
     assert updated_fm.frequency == 2
@@ -85,13 +85,13 @@ def test_update_entity(tmp_path):
 def test_create_entity(tmp_path):
     fm = EntityFrontmatter(
         title="New Entity",
-        type="personne",
+        type="person",
         created="2026-03-03",
         last_mentioned="2026-03-03",
     )
     path = create_entity(
         tmp_path, "proches", "new-entity", fm,
-        observations=[{"category": "fait", "content": "A person fact"}],
+        observations=[{"category": "fact", "content": "A person fact"}],
     )
     assert path.exists()
     fm2, sections = read_entity(path)
@@ -100,7 +100,7 @@ def test_create_entity(tmp_path):
 
 
 def test_create_stub_entity(tmp_path):
-    path = create_stub_entity(tmp_path, "interets", "natation", "Natation", "interet", "2026-03-03")
+    path = create_stub_entity(tmp_path, "interets", "natation", "Natation", "interest", "2026-03-03")
     assert path.exists()
     fm, sections = read_entity(path)
     assert fm.title == "Natation"
@@ -141,10 +141,10 @@ def test_get_chat_content(tmp_path):
 
 
 def test_list_entities(tmp_path):
-    fm = EntityFrontmatter(title="E1", type="sante", created="2026-01-01", last_mentioned="2026-01-01")
+    fm = EntityFrontmatter(title="E1", type="health", created="2026-01-01", last_mentioned="2026-01-01")
     write_entity(tmp_path / "moi" / "e1.md", fm, {"Faits": [], "Relations": [], "Historique": []})
 
-    fm2 = EntityFrontmatter(title="E2", type="personne", created="2026-01-01", last_mentioned="2026-01-01")
+    fm2 = EntityFrontmatter(title="E2", type="person", created="2026-01-01", last_mentioned="2026-01-01")
     write_entity(tmp_path / "proches" / "e2.md", fm2, {"Faits": [], "Relations": [], "Historique": []})
 
     entities = list_entities(tmp_path)
@@ -152,10 +152,10 @@ def test_list_entities(tmp_path):
 
 
 def test_duplicate_observation_skipped(tmp_path):
-    fm = EntityFrontmatter(title="Dup Test", type="sante", created="2026-01-01", last_mentioned="2026-01-01")
+    fm = EntityFrontmatter(title="Dup Test", type="health", created="2026-01-01", last_mentioned="2026-01-01")
     filepath = tmp_path / "moi" / "dup.md"
-    write_entity(filepath, fm, {"Faits": ["- [fait] Existing fact"], "Relations": [], "Historique": []})
+    write_entity(filepath, fm, {"Faits": ["- [fact] Existing fact"], "Relations": [], "Historique": []})
 
-    update_entity(filepath, new_observations=[{"category": "fait", "content": "Existing fact", "tags": []}])
+    update_entity(filepath, new_observations=[{"category": "fact", "content": "Existing fact", "tags": []}])
     _, sections = read_entity(filepath)
     assert len(sections["Faits"]) == 1  # Not duplicated

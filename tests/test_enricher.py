@@ -36,9 +36,9 @@ def test_enrich_new_entity(tmp_path):
             ResolvedEntity(
                 raw=RawEntity(
                     name="Yoga",
-                    type="interet",
+                    type="interest",
                     observations=[
-                        RawObservation(category="fait", content="Pratique le yoga", importance=0.5),
+                        RawObservation(category="fact", content="Pratique le yoga", importance=0.5),
                     ],
                 ),
                 resolution=Resolution(status="new", suggested_slug="yoga"),
@@ -65,18 +65,18 @@ def test_enrich_existing_entity(tmp_path):
 
     # Pre-create an entity
     fm = EntityFrontmatter(
-        title="Natation", type="interet", frequency=5,
+        title="Natation", type="interest", frequency=5,
         importance=0.6, last_mentioned="2026-01-01", created="2025-01-01",
     )
     write_entity(
         tmp_path / "interets" / "natation.md", fm,
-        {"Faits": ["- [fait] Aime nager"], "Relations": [], "Historique": []},
+        {"Faits": ["- [fact] Aime nager"], "Relations": [], "Historique": []},
     )
 
     # Pre-create graph
     graph = GraphData()
     graph = add_entity(graph, "natation", GraphEntity(
-        file="interets/natation.md", type="interet", title="Natation",
+        file="interets/natation.md", type="interest", title="Natation",
         frequency=5, importance=0.6, last_mentioned="2026-01-01",
     ))
     save_graph(tmp_path, graph)
@@ -86,9 +86,9 @@ def test_enrich_existing_entity(tmp_path):
             ResolvedEntity(
                 raw=RawEntity(
                     name="Natation",
-                    type="interet",
+                    type="interest",
                     observations=[
-                        RawObservation(category="fait", content="Nage 3 fois par semaine", importance=0.7),
+                        RawObservation(category="fact", content="Nage 3 fois par semaine", importance=0.7),
                     ],
                 ),
                 resolution=Resolution(status="resolved", entity_id="natation"),
@@ -114,16 +114,16 @@ def test_enrich_with_relations(tmp_path):
 
     # Pre-create source entity
     fm = EntityFrontmatter(
-        title="Mal de dos", type="sante", frequency=3,
+        title="Mal de dos", type="health", frequency=3,
         last_mentioned="2026-01-01", created="2025-01-01",
     )
     write_entity(
         tmp_path / "moi" / "mal-de-dos.md", fm,
-        {"Faits": ["- [diagnostic] Sciatique"], "Relations": [], "Historique": []},
+        {"Faits": ["- [diagnosis] Sciatique"], "Relations": [], "Historique": []},
     )
     graph = GraphData()
     graph = add_entity(graph, "mal-de-dos", GraphEntity(
-        file="moi/mal-de-dos.md", type="sante", title="Mal de dos",
+        file="moi/mal-de-dos.md", type="health", title="Mal de dos",
         frequency=3, last_mentioned="2026-01-01",
     ))
     save_graph(tmp_path, graph)
@@ -131,14 +131,14 @@ def test_enrich_with_relations(tmp_path):
     resolved = ResolvedExtraction(
         resolved=[
             ResolvedEntity(
-                raw=RawEntity(name="Mal de dos", type="sante", observations=[]),
+                raw=RawEntity(name="Mal de dos", type="health", observations=[]),
                 resolution=Resolution(status="resolved", entity_id="mal-de-dos"),
             ),
         ],
         relations=[
             RawRelation(
                 from_name="Mal de dos", to_name="Natation",
-                type="ameliore", context="soulage la douleur",
+                type="improves", context="soulage la douleur",
             ),
         ],
         summary="Test relations",

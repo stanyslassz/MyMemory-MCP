@@ -57,8 +57,8 @@ def test_cli_run_with_chat(tmp_path):
 
     mock_extraction = RawExtraction(
         entities=[
-            RawEntity(name="Vélo", type="interet", observations=[
-                RawObservation(category="fait", content="Aime le vélo", importance=0.5),
+            RawEntity(name="Vélo", type="interest", observations=[
+                RawObservation(category="fact", content="Aime le vélo", importance=0.5),
             ]),
         ],
         relations=[],

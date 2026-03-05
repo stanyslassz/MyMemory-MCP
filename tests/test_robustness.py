@@ -48,9 +48,9 @@ def test_faiss_missing_auto_rebuild_on_search(tmp_path):
     entity_dir = tmp_path / "moi"
     entity_dir.mkdir(exist_ok=True)
     (entity_dir / "test-entity.md").write_text(
-        "---\ntitle: Test Entity\ntype: sante\nretention: long_term\n"
+        "---\ntitle: Test Entity\ntype: health\nretention: long_term\n"
         "score: 0.5\nimportance: 0.5\nfrequency: 1\nlast_mentioned: 2026-03-03\n"
-        "created: 2026-03-03\naliases: []\ntags: []\n---\n\n# Test Entity\n\n## Faits\n- fait: A fact\n",
+        "created: 2026-03-03\naliases: []\ntags: []\n---\n\n# Test Entity\n\n## Faits\n- fact: A fact\n",
         encoding="utf-8",
     )
 
@@ -111,8 +111,8 @@ def test_corrupt_graph_rebuild_recovers(tmp_path):
     # Create an entity via the pipeline
     extraction = RawExtraction(
         entities=[
-            RawEntity(name="Récupération", type="sante", observations=[
-                RawObservation(category="fait", content="Test recovery", importance=0.5),
+            RawEntity(name="Récupération", type="health", observations=[
+                RawObservation(category="fact", content="Test recovery", importance=0.5),
             ]),
         ],
         relations=[],
@@ -145,8 +145,8 @@ def test_alias_collision_across_chats(tmp_path):
     # Chat 1: mentions "Dr Martin"
     extraction1 = RawExtraction(
         entities=[
-            RawEntity(name="Dr Martin", type="personne", observations=[
-                RawObservation(category="fait", content="Médecin traitant", importance=0.6),
+            RawEntity(name="Dr Martin", type="person", observations=[
+                RawObservation(category="fact", content="Médecin traitant", importance=0.6),
             ]),
         ],
         relations=[],
@@ -162,8 +162,8 @@ def test_alias_collision_across_chats(tmp_path):
     # Chat 2: mentions "Dr Martin" again (same slug)
     extraction2 = RawExtraction(
         entities=[
-            RawEntity(name="Dr Martin", type="personne", observations=[
-                RawObservation(category="fait", content="Prescrit du paracétamol", importance=0.5),
+            RawEntity(name="Dr Martin", type="person", observations=[
+                RawObservation(category="fact", content="Prescrit du paracétamol", importance=0.5),
             ]),
         ],
         relations=[],
@@ -195,8 +195,8 @@ def test_alias_collision_different_names_same_entity(tmp_path):
     # Chat 1: create "Sophie Dupont"
     extraction1 = RawExtraction(
         entities=[
-            RawEntity(name="Sophie Dupont", type="personne", observations=[
-                RawObservation(category="fait", content="Collègue de bureau", importance=0.5),
+            RawEntity(name="Sophie Dupont", type="person", observations=[
+                RawObservation(category="fact", content="Collègue de bureau", importance=0.5),
             ]),
         ],
         relations=[],
@@ -216,8 +216,8 @@ def test_alias_collision_different_names_same_entity(tmp_path):
     # Chat 2: mentions just "Sophie" — should resolve to sophie-dupont via alias
     extraction2 = RawExtraction(
         entities=[
-            RawEntity(name="Sophie", type="personne", observations=[
-                RawObservation(category="fait", content="Organise la réunion", importance=0.4),
+            RawEntity(name="Sophie", type="person", observations=[
+                RawObservation(category="fact", content="Organise la réunion", importance=0.4),
             ]),
         ],
         relations=[],
@@ -240,15 +240,15 @@ def test_relation_both_endpoints_resolved(tmp_path):
 
     extraction = RawExtraction(
         entities=[
-            RawEntity(name="Alice", type="personne", observations=[
-                RawObservation(category="fait", content="Développeuse", importance=0.5),
+            RawEntity(name="Alice", type="person", observations=[
+                RawObservation(category="fact", content="Développeuse", importance=0.5),
             ]),
-            RawEntity(name="Projet X", type="projet", observations=[
-                RawObservation(category="projet", content="Application mobile", importance=0.6),
+            RawEntity(name="Projet X", type="project", observations=[
+                RawObservation(category="project", content="Application mobile", importance=0.6),
             ]),
         ],
         relations=[
-            RawRelation(from_name="Alice", to_name="Projet X", type="fait_partie_de", context="travaille sur"),
+            RawRelation(from_name="Alice", to_name="Projet X", type="part_of", context="travaille sur"),
         ],
         summary="Alice travaille sur Projet X",
     )

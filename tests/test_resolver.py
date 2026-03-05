@@ -14,11 +14,11 @@ from src.pipeline.resolver import resolve_all, resolve_entity, slugify
 def _make_graph():
     graph = GraphData()
     graph.entities["mal-de-dos"] = GraphEntity(
-        file="moi/mal-de-dos.md", type="sante", title="Mal de dos",
+        file="moi/mal-de-dos.md", type="health", title="Mal de dos",
         aliases=["dos", "sciatique", "hernie"],
     )
     graph.entities["natation"] = GraphEntity(
-        file="interets/natation.md", type="interet", title="Natation",
+        file="interets/natation.md", type="interest", title="Natation",
         aliases=["nager", "piscine"],
     )
     return graph
@@ -63,10 +63,10 @@ def test_resolve_all():
     graph = _make_graph()
     extraction = RawExtraction(
         entities=[
-            RawEntity(name="sciatique", type="sante", observations=[
-                RawObservation(category="fait", content="Test", importance=0.5),
+            RawEntity(name="sciatique", type="health", observations=[
+                RawObservation(category="fact", content="Test", importance=0.5),
             ]),
-            RawEntity(name="Yoga", type="interet", observations=[]),
+            RawEntity(name="Yoga", type="interest", observations=[]),
         ],
         relations=[],
         summary="Test",

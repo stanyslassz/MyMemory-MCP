@@ -22,21 +22,21 @@ def test_extract_with_mock():
         entities=[
             RawEntity(
                 name="Mal de dos",
-                type="sante",
+                type="health",
                 observations=[
-                    RawObservation(category="diagnostic", content="Sciatique", importance=0.8)
+                    RawObservation(category="diagnosis", content="Sciatique", importance=0.8)
                 ],
             ),
             RawEntity(
                 name="Dr Martin",
-                type="personne",
+                type="person",
                 observations=[
-                    RawObservation(category="fait", content="Médecin traitant", importance=0.5)
+                    RawObservation(category="fact", content="Médecin traitant", importance=0.5)
                 ],
             ),
         ],
         relations=[
-            RawRelation(from_name="Dr Martin", to_name="Mal de dos", type="ameliore", context="traitement"),
+            RawRelation(from_name="Dr Martin", to_name="Mal de dos", type="improves", context="traitement"),
         ],
         summary="Patient souffre de sciatique, suivi par Dr Martin",
     )

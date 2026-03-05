@@ -68,11 +68,11 @@ def enrich_memory(
             if not to_slug:
                 to_slug = slugify(rel.to_name)
                 if to_slug not in graph.entities:
-                    folder = config.get_folder_for_type("interet")  # default type for stubs
-                    create_stub_entity(memory_path, folder, to_slug, rel.to_name, "interet", today)
+                    folder = config.get_folder_for_type("interest")  # default type for stubs
+                    create_stub_entity(memory_path, folder, to_slug, rel.to_name, "interest", today)
                     graph = add_entity(graph, to_slug, GraphEntity(
                         file=f"{folder}/{to_slug}.md",
-                        type="interet",
+                        type="interest",
                         title=rel.to_name,
                         importance=0.3,
                         frequency=1,

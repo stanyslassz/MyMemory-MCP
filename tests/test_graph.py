@@ -18,7 +18,7 @@ from src.memory.graph import (
 from src.memory.store import write_entity
 
 
-def _make_entity(title="Test", type_="sante", score=0.5, aliases=None):
+def _make_entity(title="Test", type_="health", score=0.5, aliases=None):
     return GraphEntity(
         file=f"moi/{title.lower().replace(' ', '-')}.md",
         type=type_,
@@ -61,7 +61,7 @@ def test_add_relation_dedup(tmp_path):
     graph = add_entity(graph, "a", _make_entity("A"))
     graph = add_entity(graph, "b", _make_entity("B"))
 
-    rel = GraphRelation(from_entity="a", to_entity="b", type="affecte")
+    rel = GraphRelation(from_entity="a", to_entity="b", type="affects")
     graph = add_relation(graph, rel)
     graph = add_relation(graph, rel)  # duplicate
     assert len(graph.relations) == 1
@@ -70,7 +70,7 @@ def test_add_relation_dedup(tmp_path):
 def test_remove_orphan_relations():
     graph = GraphData()
     graph = add_entity(graph, "a", _make_entity("A"))
-    rel = GraphRelation(from_entity="a", to_entity="nonexistent", type="affecte")
+    rel = GraphRelation(from_entity="a", to_entity="nonexistent", type="affects")
     graph.relations.append(rel)
 
     graph = remove_orphan_relations(graph)
@@ -83,8 +83,8 @@ def test_get_related():
     graph = add_entity(graph, "b", _make_entity("B"))
     graph = add_entity(graph, "c", _make_entity("C"))
 
-    graph = add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affecte"))
-    graph = add_relation(graph, GraphRelation(from_entity="b", to_entity="c", type="ameliore"))
+    graph = add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"))
+    graph = add_relation(graph, GraphRelation(from_entity="b", to_entity="c", type="improves"))
 
     # Depth 1
     related = get_related(graph, "a", depth=1)
@@ -101,7 +101,7 @@ def test_get_related_bidirectional():
     graph = GraphData()
     graph = add_entity(graph, "a", _make_entity("A"))
     graph = add_entity(graph, "b", _make_entity("B"))
-    graph = add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affecte"))
+    graph = add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"))
 
     # Should find 'a' when starting from 'b' (reverse traversal)
     related = get_related(graph, "b", depth=1)
@@ -121,7 +121,7 @@ def test_get_aliases_lookup():
 def test_validate_graph(tmp_path):
     graph = GraphData()
     graph = add_entity(graph, "test", GraphEntity(
-        file="moi/test.md", type="sante", title="Test"
+        file="moi/test.md", type="health", title="Test"
     ))
     # File doesn't exist
     warnings = validate_graph(graph, tmp_path)
@@ -152,14 +152,14 @@ def test_load_corrupt_graph_and_bak_rebuilds_from_md(tmp_path):
     # Create a valid entity MD file
     fm = EntityFrontmatter(
         title="Rebuilt Entity",
-        type="sante",
+        type="health",
         created="2025-01-01",
         last_mentioned="2026-03-01",
     )
     write_entity(
         tmp_path / "moi" / "rebuilt-entity.md",
         fm,
-        {"Faits": ["- [fait] A fact"], "Relations": [], "Historique": []},
+        {"Faits": ["- [fact] A fact"], "Relations": [], "Historique": []},
     )
 
     # Write corrupt primary and backup
@@ -187,7 +187,7 @@ def test_rebuild_from_md(tmp_path):
     # Create entity MD files
     fm1 = EntityFrontmatter(
         title="Entity One",
-        type="sante",
+        type="health",
         score=0.5,
         frequency=3,
         last_mentioned="2026-03-03",
@@ -198,15 +198,15 @@ def test_rebuild_from_md(tmp_path):
         tmp_path / "moi" / "entity-one.md",
         fm1,
         {
-            "Faits": ["- [fait] A fact"],
-            "Relations": ["- affecte [[Entity Two]]"],
+            "Faits": ["- [fact] A fact"],
+            "Relations": ["- affects [[Entity Two]]"],
             "Historique": [],
         },
     )
 
     fm2 = EntityFrontmatter(
         title="Entity Two",
-        type="interet",
+        type="interest",
         created="2025-01-01",
         last_mentioned="2026-01-01",
     )

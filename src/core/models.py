@@ -9,20 +9,20 @@ from pydantic import BaseModel, Field
 # ── Closed lists (from spec §4) ──────────────────────────────
 
 ObservationCategory = Literal[
-    "fait", "preference", "diagnostic", "traitement", "progression",
+    "fact", "preference", "diagnosis", "treatment", "progression",
     "technique", "vigilance", "decision", "emotion",
-    "relation_interpersonnelle", "competence", "projet", "contexte", "regle",
+    "interpersonal", "skill", "project", "context", "rule",
 ]
 
 EntityType = Literal[
-    "personne", "sante", "travail", "projet", "interet",
-    "lieu", "animal", "organisation",
+    "person", "health", "work", "project", "interest",
+    "place", "animal", "organization",
 ]
 
 RelationType = Literal[
-    "affecte", "ameliore", "aggrave", "necessite", "lie_a",
-    "vit_avec", "travaille_a", "parent_de", "ami_de", "utilise",
-    "fait_partie_de", "contraste_avec", "precede",
+    "affects", "improves", "worsens", "requires", "linked_to",
+    "lives_with", "works_at", "parent_of", "friend_of", "uses",
+    "part_of", "contrasts_with", "precedes",
 ]
 
 
