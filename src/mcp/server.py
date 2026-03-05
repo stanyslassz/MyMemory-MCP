@@ -7,7 +7,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from src.core.config import load_config
-from src.memory.graph import load_graph
+from src.memory.graph import load_graph, save_graph
 from src.memory.store import save_chat as store_save_chat
 from src.pipeline.indexer import search as faiss_search
 
@@ -78,6 +78,14 @@ def search_rag(query: str) -> dict:
 
     # Enrich with graph relations
     graph = load_graph(memory_path)
+
+    # Re-rank: combined FAISS similarity + graph score
+    for result in results:
+        entity = graph.entities.get(result.entity_id)
+        graph_score = entity.score if entity else 0.0
+        result.score = result.score * 0.6 + graph_score * 0.4
+    results.sort(key=lambda r: r.score, reverse=True)
+
     enriched_results = []
 
     for result in results:
@@ -110,6 +118,28 @@ def search_rag(query: str) -> dict:
             "type": entity.type if entity else "unknown",
             "relations": relations,
         })
+
+    # L2→L1 re-emergence: bump mention_dates for retrieved entities
+    from datetime import date as date_type
+    from src.memory.mentions import add_mention
+    from src.memory.scoring import recalculate_all_scores
+
+    today = date_type.today().isoformat()
+    promoted = False
+    for result in results:
+        entity_id = result.entity_id
+        if entity_id in graph.entities:
+            entity = graph.entities[entity_id]
+            entity.mention_dates, entity.monthly_buckets = add_mention(
+                today, entity.mention_dates, entity.monthly_buckets,
+                window_size=config.scoring.window_size,
+            )
+            entity.last_mentioned = today
+            promoted = True
+
+    if promoted:
+        graph = recalculate_all_scores(graph, config)
+        save_graph(memory_path, graph)
 
     return {
         "query": query,

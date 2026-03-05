@@ -96,7 +96,7 @@ def run(ctx):
 
         # Step 2: Resolve
         graph = load_graph(memory_path)
-        resolved = resolve_all(extraction, graph)
+        resolved = resolve_all(extraction, graph, faiss_search_fn=_make_faiss_fn(config, memory_path))
 
         # Step 3: Arbitrate ambiguous
         for item in resolved.resolved:
@@ -469,7 +469,7 @@ def replay(ctx, list_only):
             console.print(f"  Extracted {len(extraction.entities)} entities")
 
             graph = load_graph(config.memory_path)
-            resolved = resolve_all(extraction, graph)
+            resolved = resolve_all(extraction, graph, faiss_search_fn=_make_faiss_fn(config, config.memory_path))
 
             report = enrich_memory(resolved, config)
             mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
@@ -481,6 +481,25 @@ def replay(ctx, list_only):
             console.print(f"  [red]Replay failed: {e}[/red]")
 
     console.print("\n[bold green]Replay complete.[/bold green]")
+
+
+def _make_faiss_fn(config, memory_path):
+    """Create a FAISS search wrapper compatible with resolver's faiss_search_fn signature.
+
+    The resolver expects: fn(query: str, top_k: int, threshold: float) -> list[dict]
+    The indexer.search expects: search(query, config, memory_path, top_k) -> list[SearchResult]
+    """
+    from src.pipeline.indexer import search as _search
+
+    def fn(query: str, top_k: int = 3, threshold: float = 0.85):
+        results = _search(query, config, memory_path, top_k=top_k)
+        return [
+            {"entity_id": r.entity_id, "score": r.score}
+            for r in results
+            if r.score >= threshold
+        ]
+
+    return fn
 
 
 def _is_timeout_error(exc: Exception) -> bool:
