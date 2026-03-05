@@ -124,3 +124,65 @@ def test_resolution():
     assert len(r2.candidates) == 2
     r3 = Resolution(status="new", suggested_slug="new-entity")
     assert r3.suggested_slug == "new-entity"
+
+
+def test_graph_entity_new_fields():
+    entity = GraphEntity(
+        file="self/test.md", type="health", title="Test",
+        mention_dates=["2026-03-01", "2026-03-03"],
+        monthly_buckets={"2025-01": 5},
+        summary="A brief summary.",
+        created="2026-01-15",
+    )
+    assert len(entity.mention_dates) == 2
+    assert entity.monthly_buckets["2025-01"] == 5
+    assert entity.summary == "A brief summary."
+    assert entity.created == "2026-01-15"
+
+def test_graph_entity_defaults_for_new_fields():
+    entity = GraphEntity(file="self/test.md", type="health", title="Test")
+    assert entity.mention_dates == []
+    assert entity.monthly_buckets == {}
+    assert entity.created == ""
+    assert entity.summary == ""
+
+def test_frontmatter_new_fields():
+    fm = EntityFrontmatter(
+        title="Test", type="health",
+        mention_dates=["2026-03-01"],
+        monthly_buckets={"2025-06": 3},
+        summary="Summary text.",
+    )
+    assert len(fm.mention_dates) == 1
+    assert fm.summary == "Summary text."
+
+def test_graph_relation_enriched_fields():
+    rel = GraphRelation(
+        from_entity="a", to_entity="b", type="affects",
+        strength=0.7, created="2026-01-01",
+        last_reinforced="2026-03-01", mention_count=5,
+        context="A affects B because of X",
+    )
+    assert rel.strength == 0.7
+    assert rel.mention_count == 5
+    assert rel.context == "A affects B because of X"
+
+def test_graph_relation_defaults():
+    rel = GraphRelation(from_entity="a", to_entity="b", type="affects")
+    assert rel.strength == 0.5
+    assert rel.mention_count == 1
+    assert rel.context == ""
+    assert rel.created == ""
+    assert rel.last_reinforced == ""
+
+def test_graph_relation_serialization_with_new_fields():
+    rel = GraphRelation(
+        from_entity="a", to_entity="b", type="affects",
+        strength=0.8, context="test reason",
+    )
+    data = rel.model_dump(by_alias=True)
+    assert data["from"] == "a"
+    assert data["strength"] == 0.8
+    assert data["context"] == "test reason"
+    restored = GraphRelation.model_validate(data)
+    assert restored.strength == 0.8

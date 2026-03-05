@@ -95,12 +95,22 @@ class GraphEntity(BaseModel):
     retention: Literal["short_term", "long_term", "permanent"] = "short_term"
     aliases: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    # Phase 1: adaptive memory fields
+    mention_dates: list[str] = Field(default_factory=list)
+    monthly_buckets: dict[str, int] = Field(default_factory=dict)
+    created: str = ""
+    summary: str = ""
 
 
 class GraphRelation(BaseModel):
     from_entity: str = Field(alias="from", serialization_alias="from")
     to_entity: str = Field(alias="to", serialization_alias="to")
     type: RelationType
+    strength: float = 0.5
+    created: str = ""
+    last_reinforced: str = ""
+    mention_count: int = 1
+    context: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -124,6 +134,10 @@ class EntityFrontmatter(BaseModel):
     created: str = ""
     aliases: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    # Phase 1: adaptive memory fields
+    mention_dates: list[str] = Field(default_factory=list)
+    monthly_buckets: dict[str, int] = Field(default_factory=dict)
+    summary: str = ""
 
 
 # ── Enrichment report ────────────────────────────────────────
