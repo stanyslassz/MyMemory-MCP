@@ -212,6 +212,10 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
                 retention=fm_data.get("retention", "short_term"),
                 aliases=fm_data.get("aliases", []),
                 tags=fm_data.get("tags", []),
+                mention_dates=fm_data.get("mention_dates", []),
+                monthly_buckets=fm_data.get("monthly_buckets", {}),
+                created=str(fm_data.get("created", "")),
+                summary=fm_data.get("summary", ""),
             )
             graph.entities[slug] = entity
 
