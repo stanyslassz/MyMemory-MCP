@@ -183,6 +183,7 @@ def _create_new_entity(
         created=today,
         aliases=[],
         tags=list({tag for obs in raw_entity.observations for tag in obs.tags}),
+        mention_dates=[today],
     )
 
     observations = [
