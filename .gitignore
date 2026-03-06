@@ -33,7 +33,11 @@ wheels/
 *.egg-info
 .venv/
 
-# ── Planning docs (local-only) ──
+# ── Planning docs & LLM artifacts (local-only) ──
 CLAUDE_PLAN_REQUEST.md
 IMPLEMENTATION_PLAN_V2_TRUE_RAG.md
 CLAUDE.md
+docs/plans/
+plan.md
+.claude/
+config.claude-desktop.yaml
