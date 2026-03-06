@@ -41,3 +41,6 @@ docs/plans/
 plan.md
 .claude/
 config.claude-desktop.yaml
+
+# ── Worktrees ──
+.worktrees/
