@@ -26,6 +26,7 @@ class LLMStepConfig:
     max_retries: int = 3
     timeout: int = 60
     api_base: str | None = None
+    context_window: int = 8192
 
 
 @dataclass
@@ -139,6 +140,7 @@ def _build_llm_step(data: dict[str, Any]) -> LLMStepConfig:
         max_retries=data.get("max_retries", 3),
         timeout=data.get("timeout", 60),
         api_base=data.get("api_base"),
+        context_window=data.get("context_window", 8192),
     )
 
 

@@ -12,6 +12,7 @@ user_language: fr  # Content language (prompts adapt to this)
 llm:
   extraction:
     model: ollama/llama3.1:8b       # or openai/gpt-4o-mini, anthropic/claude-sonnet-4-5-20250929
+    context_window: 8192            # Model context window in tokens
     temperature: 0
     max_retries: 3
     timeout: 60
