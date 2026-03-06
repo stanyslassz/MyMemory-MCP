@@ -86,8 +86,8 @@ def test_load_real_config():
     project_root = Path(__file__).parent.parent
     config = load_config(project_root=project_root)
     assert config.user_language in ("fr", "en")
-    assert len(config.categories.observations) == 14
-    assert len(config.categories.entity_types) == 8
+    assert len(config.categories.observations) == 17
+    assert len(config.categories.entity_types) == 9
     assert len(config.categories.relation_types) == 13
 
 
