@@ -221,6 +221,19 @@ def rebuild_all(ctx):
     # Graph
     graph = rebuild_from_md(config.memory_path)
     graph = recalculate_all_scores(graph, config)
+
+    # Repair entities with empty mention_dates (created before the fix)
+    repaired = 0
+    for eid, entity in graph.entities.items():
+        if not entity.mention_dates and entity.created:
+            entity.mention_dates = [entity.created]
+            repaired += 1
+        elif not entity.mention_dates and entity.last_mentioned:
+            entity.mention_dates = [entity.last_mentioned]
+            repaired += 1
+    if repaired:
+        console.print(f"  [yellow]Repaired {repaired} entities with empty mention_dates[/yellow]")
+
     save_graph(config.memory_path, graph)
     console.print(f"  Graph: {len(graph.entities)} entities, {len(graph.relations)} relations")
 
