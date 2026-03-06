@@ -5,17 +5,19 @@ from unittest.mock import patch
 
 from src.core.config import Config, ScoringConfig
 from src.core.models import EntityFrontmatter, GraphData, GraphEntity, GraphRelation
-from src.memory.context import build_context_input, build_deterministic_context, generate_index, write_index
+from src.memory.context import build_context, build_context_input, build_deterministic_context, generate_index, write_index
 from src.memory.store import write_entity
 
 
-def _make_config(memory_path):
+def _make_config(tmp_path):
     config = Config.__new__(Config)
     config.scoring = ScoringConfig(min_score_for_context=0.0)
-    config.memory_path = memory_path
+    config.memory_path = tmp_path
     config.context_max_tokens = 3000
     config.context_budget = {"identity": 10, "top_of_mind": 25}
     config.user_language = "fr"
+    config.prompts_path = tmp_path / "prompts"
+    config.context_narrative = False
     return config
 
 
@@ -92,7 +94,7 @@ def test_path_traversal_entity_file_blocked(tmp_path):
 
 
 def test_deterministic_context_has_all_sections(tmp_path):
-    """Context output should have all required sections."""
+    """Context output should have template structure with key sections."""
     # Create minimal memory structure
     (tmp_path / "self").mkdir()
 
@@ -114,14 +116,9 @@ def test_deterministic_context_has_all_sections(tmp_path):
     config = _make_config(tmp_path)
 
     result = build_deterministic_context(graph, tmp_path, config)
-    assert "# Memory Context" in result
+    # Template-based structure
+    assert "Personal Memory" in result
     assert "## Identity" in result
-    assert "## Top of mind" in result
-    assert "## Vigilances" in result
-    assert "## Work & Projects" in result
-    assert "## Close ones" in result
-    assert "## Available in memory" in result
-    assert "## Memory tags" in result
 
 
 def test_deterministic_context_categorization(tmp_path):
@@ -150,7 +147,7 @@ def test_deterministic_context_categorization(tmp_path):
     write_entity(tmp_path / "close_ones" / "alice.md", fm_alice,
                  {"Facts": [], "Relations": [], "History": []})
 
-    # Project entity
+    # Project entity (type "project" goes to Top of mind since it's not "work" or "organization")
     graph.entities["proj"] = GraphEntity(
         file="projects/proj.md", type="project", title="MyProject",
         score=0.6, importance=0.5, summary="A coding project.",
@@ -162,12 +159,15 @@ def test_deterministic_context_categorization(tmp_path):
     config = _make_config(tmp_path)
     result = build_deterministic_context(graph, tmp_path, config)
 
-    # Identity section should contain "The user."
-    assert "The user." in result
-    # Close ones section should contain Alice
+    # Identity section should contain "Me" entity
+    assert "## Identity" in result
+    assert "Me" in result
+    # Person entity should appear in Personal context
     assert "Alice" in result
-    # Work & Projects should contain MyProject
+    assert "## Personal context" in result
+    # Project entity should appear in Top of mind (type "project" is not "work"/"organization")
     assert "MyProject" in result
+    assert "## Top of mind" in result
 
 
 def test_deterministic_context_vigilance(tmp_path):
@@ -191,24 +191,30 @@ def test_deterministic_context_vigilance(tmp_path):
     assert "## Vigilances" in result
 
 
-def test_deterministic_context_tags(tmp_path):
-    """Tags from entities should appear in Memory tags section."""
-    (tmp_path / "interests").mkdir()
+def test_build_context_uses_template(tmp_path):
+    """build_context should use the template from prompts_path."""
+    config = _make_config(tmp_path)
+
+    # Create a custom template
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    template = "# My Memory — {date}\n\n{sections}\n\nEntities: {available_entities}\n{ai_personality}\n{user_language_name}\n{custom_instructions}"
+    (prompts_dir / "context_template.md").write_text(template, encoding="utf-8")
 
     graph = GraphData(generated="2026-03-05")
-    graph.entities["python"] = GraphEntity(
-        file="interests/python.md", type="interest", title="Python",
-        score=0.6, importance=0.5, tags=["coding", "language"],
+    graph.entities["test-ent"] = GraphEntity(
+        file="self/test.md", type="health", title="Test Entity",
+        score=0.7, importance=0.5,
     )
-
-    fm = EntityFrontmatter(title="Python", type="interest", score=0.6, importance=0.5,
-                           tags=["coding", "language"])
-    write_entity(tmp_path / "interests" / "python.md", fm,
+    (tmp_path / "self").mkdir()
+    fm = EntityFrontmatter(title="Test Entity", type="health", score=0.7, importance=0.5)
+    write_entity(tmp_path / "self" / "test.md", fm,
                  {"Facts": [], "Relations": [], "History": []})
 
-    config = _make_config(tmp_path)
-    result = build_deterministic_context(graph, tmp_path, config)
-    assert "#coding" in result or "#language" in result
+    result = build_context(graph, tmp_path, config)
+    assert "# My Memory" in result
+    assert "Test Entity" in result
+    assert "French" in result
 
 
 def test_write_index(tmp_path):
