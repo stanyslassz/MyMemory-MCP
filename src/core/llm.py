@@ -132,9 +132,18 @@ def _call_with_stall_detection(
             kwargs["timeout"] = step_config.timeout * 3
 
             partial = client.chat.completions.create_partial(**kwargs)
+            chunk_count = 0
             for chunk in partial:
                 with lock:
+                    delta = time.monotonic() - last_activity
                     last_activity = time.monotonic()
+                    chunk_count += 1
+                chunk_str = str(chunk)
+                has_think = "<think>" in chunk_str or "</think>" in chunk_str
+                logger.debug(
+                    "chunk #%d: %d chars, think=%s, delta=%.1fs",
+                    chunk_count, len(chunk_str), has_think, delta,
+                )
                 result = chunk  # keep last complete partial
             # Final result is the last chunk (fully validated by Instructor)
         except Exception as e:

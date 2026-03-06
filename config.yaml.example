@@ -12,6 +12,7 @@ user_language: fr  # Content language (prompts adapt to this)
 llm:
   extraction:
     model: ollama/llama3.1:8b       # or openai/gpt-4o-mini, anthropic/claude-sonnet-4-5-20250929
+    context_window: 8192            # Model context window in tokens
     temperature: 0
     max_retries: 3
     timeout: 60
@@ -44,15 +45,18 @@ embeddings:
 memory:
   path: ./memory
   context_max_tokens: 3000
+  context_narrative: false        # Use narrative prose instead of structured sections
   context_budget:
+    ai_personality: 8
     identity: 10
-    top_of_mind: 25
-    vigilances: 15
-    boost: 10
     work: 10
-    projects: 10
-    ai_instructions: 15
-    close_ones: 5
+    personal: 10
+    top_of_mind: 17
+    vigilances: 10
+    history_recent: 12
+    history_earlier: 8
+    history_longterm: 5
+    instructions: 10
 
 # ── ACT-R Scoring ──────────────────────────────────────────────
 scoring:
@@ -126,6 +130,9 @@ categories:
     - project
     - context
     - rule
+    - ai_style
+    - user_reaction
+    - interaction_rule
   entity_types:
     - person
     - health
@@ -135,6 +142,7 @@ categories:
     - place
     - animal
     - organization
+    - ai_self
   relation_types:
     - affects
     - improves
@@ -158,3 +166,4 @@ categories:
     place: interests
     animal: close_ones
     organization: work
+    ai_self: self

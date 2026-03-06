@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from src.core.models import RawEntity, RawExtraction, RawObservation, RawRelation
-from src.pipeline.extractor import extract_from_chat
+from src.pipeline.extractor import extract_from_chat, _merge_extractions
 
 
 def test_extract_empty_chat():
@@ -51,3 +51,42 @@ def test_extract_with_mock():
     assert result.entities[0].name == "Mal de dos"
     assert len(result.relations) == 1
     assert result.summary != ""
+
+
+def test_merge_extractions():
+    """_merge_extractions deduplicates entities and relations."""
+    ext1 = RawExtraction(
+        entities=[
+            RawEntity(name="Sophie", type="person", observations=[
+                RawObservation(category="fact", content="Nurse", importance=0.5),
+            ]),
+        ],
+        relations=[
+            RawRelation(from_name="Alexis", to_name="Sophie", type="lives_with", context=""),
+        ],
+        summary="Part 1",
+    )
+    ext2 = RawExtraction(
+        entities=[
+            RawEntity(name="Sophie", type="person", observations=[
+                RawObservation(category="fact", content="Nurse", importance=0.5),  # duplicate
+                RawObservation(category="fact", content="Works at Purpan", importance=0.6),  # new
+            ]),
+        ],
+        relations=[
+            RawRelation(from_name="Alexis", to_name="Sophie", type="lives_with", context=""),  # duplicate
+            RawRelation(from_name="Sophie", to_name="Purpan", type="works_at", context=""),  # new
+        ],
+        summary="Part 2",
+    )
+
+    merged = _merge_extractions([ext1, ext2])
+
+    assert len(merged.entities) == 1
+    assert merged.entities[0].name == "Sophie"
+    assert len(merged.entities[0].observations) == 2
+
+    assert len(merged.relations) == 2
+
+    assert "Part 1" in merged.summary
+    assert "Part 2" in merged.summary

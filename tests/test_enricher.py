@@ -150,3 +150,50 @@ def test_enrich_with_relations(tmp_path):
     # Natation should have been created as a stub (forward reference)
     graph = load_graph(tmp_path)
     assert "natation" in graph.entities
+
+
+def test_create_new_entity_has_mention_dates(tmp_path):
+    """New entities must have mention_dates=[today] in frontmatter."""
+    import re
+    import yaml
+    from src.pipeline.enricher import enrich_memory
+    from src.core.config import Config, CategoriesConfig
+    from src.core.models import (
+        ResolvedExtraction, ResolvedEntity, Resolution,
+        RawEntity, RawObservation,
+    )
+
+    memory_path = tmp_path / "memory"
+    (memory_path / "close_ones").mkdir(parents=True)
+    (memory_path / "_graph.json").write_text('{"entities":{}, "relations":[]}')
+
+    config = Config(
+        memory_path=memory_path,
+        categories=CategoriesConfig(folders={"person": "close_ones"}),
+    )
+
+    resolved = ResolvedExtraction(
+        resolved=[
+            ResolvedEntity(
+                raw=RawEntity(
+                    name="TestPerson",
+                    type="person",
+                    observations=[
+                        RawObservation(category="fact", content="Test fact", importance=0.5, tags=["test"]),
+                    ],
+                ),
+                resolution=Resolution(status="new", suggested_slug="testperson"),
+            ),
+        ],
+        relations=[],
+    )
+
+    enrich_memory(resolved, config, today="2026-03-06")
+
+    entity_file = memory_path / "close_ones" / "testperson.md"
+    assert entity_file.exists()
+    text = entity_file.read_text()
+    match = re.match(r"^---\n(.*?\n)---\n", text, re.DOTALL)
+    assert match
+    fm = yaml.safe_load(match.group(1))
+    assert fm["mention_dates"] == ["2026-03-06"]

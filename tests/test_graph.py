@@ -243,3 +243,37 @@ def test_rebuild_from_md(tmp_path):
     # Should have parsed the relation
     assert len(graph.relations) >= 1
     assert graph.relations[0].from_entity == "entity-one"
+
+
+def test_rebuild_from_md_reads_mention_dates(tmp_path):
+    """rebuild_from_md must read mention_dates, monthly_buckets, created from frontmatter."""
+    entity_dir = tmp_path / "close_ones"
+    entity_dir.mkdir(parents=True)
+    (entity_dir / "sophie.md").write_text(
+        "---\n"
+        "title: Sophie\n"
+        "type: person\n"
+        "retention: short_term\n"
+        "score: 0.0\n"
+        "importance: 0.5\n"
+        "frequency: 2\n"
+        "last_mentioned: '2026-03-05'\n"
+        "created: '2026-03-03'\n"
+        "aliases: []\n"
+        "tags: [relation]\n"
+        "mention_dates:\n"
+        "- '2026-03-03'\n"
+        "- '2026-03-05'\n"
+        "monthly_buckets: {}\n"
+        "summary: ''\n"
+        "---\n\n# Sophie\n\n## Facts\n\n- [fact] Infirmière\n\n## Relations\n\n## History\n",
+        encoding="utf-8",
+    )
+
+    from src.memory.graph import rebuild_from_md
+    graph = rebuild_from_md(tmp_path)
+
+    sophie = graph.entities["sophie"]
+    assert sophie.mention_dates == ["2026-03-03", "2026-03-05"]
+    assert sophie.created == "2026-03-03"
+    assert sophie.monthly_buckets == {}
