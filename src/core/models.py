@@ -12,11 +12,12 @@ ObservationCategory = Literal[
     "fact", "preference", "diagnosis", "treatment", "progression",
     "technique", "vigilance", "decision", "emotion",
     "interpersonal", "skill", "project", "context", "rule",
+    "ai_style", "user_reaction", "interaction_rule",
 ]
 
 EntityType = Literal[
     "person", "health", "work", "project", "interest",
-    "place", "animal", "organization",
+    "place", "animal", "organization", "ai_self",
 ]
 
 RelationType = Literal[

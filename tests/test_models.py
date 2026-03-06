@@ -186,3 +186,19 @@ def test_graph_relation_serialization_with_new_fields():
     assert data["context"] == "test reason"
     restored = GraphRelation.model_validate(data)
     assert restored.strength == 0.8
+
+
+def test_ai_self_entity_type():
+    """ai_self must be a valid entity type."""
+    from src.core.models import RawEntity, RawObservation
+    entity = RawEntity(
+        name="AI Personality",
+        type="ai_self",
+        observations=[
+            RawObservation(category="ai_style", content="Be direct", importance=0.7, tags=["communication"]),
+            RawObservation(category="user_reaction", content="Liked tables", importance=0.5, tags=["format"]),
+            RawObservation(category="interaction_rule", content="No repeats", importance=0.8, tags=["rules"]),
+        ],
+    )
+    assert entity.type == "ai_self"
+    assert entity.observations[0].category == "ai_style"
