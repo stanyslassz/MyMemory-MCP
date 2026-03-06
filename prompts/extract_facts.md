@@ -12,6 +12,9 @@ Rules:
 - Use entity names as they appear in the conversation.
 - All extracted content (entity names, observations, summaries) MUST be written
   in {user_language}. The conversation is in the user's language — preserve it.
+- Also extract interaction style observations: how the user likes to be responded to,
+  what formats they prefer, what annoys them. Store these as entity "AI Personality"
+  with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
 - Respond ONLY with valid JSON. No text before or after.
 
 # USER
@@ -20,6 +23,35 @@ Rules:
 
 {chat_content}
 
-## Expected response format (JSON)
+## Example output
 
-{json_schema}
+Here is an example of the expected JSON format (do NOT copy this data — extract from the conversation above):
+
+```json
+{
+  "entities": [
+    {
+      "name": "Marie",
+      "type": "person",
+      "observations": [
+        {"category": "fact", "content": "Travaille chez Airbus", "importance": 0.6, "tags": ["travail"]},
+        {"category": "preference", "content": "Aime le yoga", "importance": 0.3, "tags": ["sport"]}
+      ]
+    },
+    {
+      "name": "AI Personality",
+      "type": "ai_self",
+      "observations": [
+        {"category": "ai_style", "content": "User prefers direct answers without filler", "importance": 0.7, "tags": ["communication"]},
+        {"category": "user_reaction", "content": "User liked the comparative table format", "importance": 0.5, "tags": ["format"]}
+      ]
+    }
+  ],
+  "relations": [
+    {"from_name": "Marie", "to_name": "Airbus", "type": "works_at", "context": "Current job"}
+  ],
+  "summary": "Discussion about Marie and her health"
+}
+```
+
+Now extract entities and relations from the conversation above. Return ONLY a JSON object with keys "entities", "relations", and "summary". Do NOT return the schema — return the actual extracted data.
