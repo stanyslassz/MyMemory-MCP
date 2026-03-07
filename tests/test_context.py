@@ -217,6 +217,35 @@ def test_build_context_uses_template(tmp_path):
     assert "French" in result
 
 
+def test_facts_sorted_by_date_in_context(tmp_path):
+    """Facts should be sorted chronologically in context output."""
+    (tmp_path / "self").mkdir()
+
+    graph = GraphData(generated="2026-03-05")
+    graph.entities["health-ent"] = GraphEntity(
+        file="self/health-ent.md", type="health", title="Health Issue",
+        score=0.8, importance=0.9,
+    )
+
+    fm = EntityFrontmatter(title="Health Issue", type="health", score=0.8, importance=0.9)
+    write_entity(tmp_path / "self" / "health-ent.md", fm,
+                 {"Facts": [
+                     "- [fact] Undated fact",
+                     "- [diagnosis] (2025-11) Later diagnosis [-]",
+                     "- [fact] (2024-03) Earlier fact [+]",
+                 ],
+                  "Relations": [], "History": []})
+
+    config = _make_config(tmp_path)
+    result = build_context(graph, tmp_path, config)
+
+    # Dated facts should appear chronologically (2024 before 2025), undated last
+    idx_earlier = result.find("Earlier fact")
+    idx_later = result.find("Later diagnosis")
+    idx_undated = result.find("Undated fact")
+    assert idx_earlier < idx_later < idx_undated
+
+
 def test_write_index(tmp_path):
     graph = GraphData(generated="2026-03-03")
     graph.entities["test"] = GraphEntity(

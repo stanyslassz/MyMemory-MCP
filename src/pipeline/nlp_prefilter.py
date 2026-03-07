@@ -58,17 +58,6 @@ def extract_entities(text: str) -> list[dict]:
     ]
 
 
-def compute_similarity(text1: str, text2: str) -> float:
-    """Compute semantic similarity between two texts using spaCy vectors."""
-    if not is_available():
-        return 0.0
-    nlp = _get_nlp()
-    doc1 = nlp(text1)
-    doc2 = nlp(text2)
-    if doc1.vector_norm == 0 or doc2.vector_norm == 0:
-        return 0.0
-    return doc1.similarity(doc2)
-
 
 def _try_parse_french_date(text: str, reference_date: str | None = None) -> str | None:
     """Try to parse a French date expression to ISO format."""

@@ -48,6 +48,7 @@ class ScoringConfig:
     permanent_min_score: float = 0.5
     relation_strength_base: float = 0.5
     relation_decay_halflife: int = 180
+    relation_strength_growth: float = 0.05
     window_size: int = 50
     min_score_for_context: float = 0.3
     # Legacy fields (used until Phase 2 replaces scoring.py)
@@ -206,6 +207,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             permanent_min_score=scoring.get("permanent_min_score", 0.5),
             relation_strength_base=scoring.get("relation_strength_base", 0.5),
             relation_decay_halflife=scoring.get("relation_decay_halflife", 180),
+            relation_strength_growth=scoring.get("relation_strength_growth", 0.05),
             window_size=scoring.get("window_size", 50),
             min_score_for_context=scoring.get("min_score_for_context", 0.3),
             weight_importance=scoring.get("weight_importance", 0.4),

@@ -12,6 +12,10 @@ Rules:
 - Use entity names as they appear in the conversation.
 - All extracted content (entity names, observations, summaries) MUST be written
   in {user_language}. The conversation is in the user's language — preserve it.
+- If a date is mentioned or clearly deducible from context, include the "date" field
+  in YYYY-MM or YYYY-MM-DD format. Leave empty if no date is identifiable.
+- For each observation, indicate emotional valence: "positive", "negative", or "neutral".
+  Leave empty if uncertain or truly neutral.
 - Also extract interaction style observations: how the user likes to be responded to,
   what formats they prefer, what annoys them. Store these as entity "AI Personality"
   with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
@@ -34,16 +38,16 @@ Here is an example of the expected JSON format (do NOT copy this data — extrac
       "name": "Marie",
       "type": "person",
       "observations": [
-        {"category": "fact", "content": "Travaille chez Airbus", "importance": 0.6, "tags": ["travail"]},
-        {"category": "preference", "content": "Aime le yoga", "importance": 0.3, "tags": ["sport"]}
+        {"category": "fact", "content": "Travaille chez Airbus", "importance": 0.6, "tags": ["travail"], "date": "2024-09", "valence": ""},
+        {"category": "preference", "content": "Aime le yoga", "importance": 0.3, "tags": ["sport"], "date": "", "valence": "positive"}
       ]
     },
     {
       "name": "AI Personality",
       "type": "ai_self",
       "observations": [
-        {"category": "ai_style", "content": "User prefers direct answers without filler", "importance": 0.7, "tags": ["communication"]},
-        {"category": "user_reaction", "content": "User liked the comparative table format", "importance": 0.5, "tags": ["format"]}
+        {"category": "ai_style", "content": "User prefers direct answers without filler", "importance": 0.7, "tags": ["communication"], "date": "", "valence": ""},
+        {"category": "user_reaction", "content": "User liked the comparative table format", "importance": 0.5, "tags": ["format"], "date": "", "valence": "positive"}
       ]
     }
   ],

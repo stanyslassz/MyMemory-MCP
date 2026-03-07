@@ -199,8 +199,41 @@ def test_add_relation_reinforces_existing():
     add_relation(graph, rel2)
     assert len(graph.relations) == 1  # Still 1, not duplicated
     assert graph.relations[0].mention_count == 2  # Reinforced
+    assert graph.relations[0].strength == 0.55  # Hebbian: 0.5 + 0.05
     assert graph.relations[0].context == "new context"
     assert graph.relations[0].last_reinforced != ""
+
+
+def test_hebbian_strength_grows_with_mentions():
+    """After multiple co-mentions, strength should exceed initial 0.5."""
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(file="self/a.md", type="health", title="A")
+    graph.entities["b"] = GraphEntity(file="self/b.md", type="health", title="B")
+
+    rel = GraphRelation(from_entity="a", to_entity="b", type="affects",
+                        strength=0.5, mention_count=1)
+    add_relation(graph, rel)
+
+    # Reinforce 10 more times
+    for _ in range(10):
+        add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"))
+
+    assert graph.relations[0].mention_count == 11
+    assert graph.relations[0].strength > 0.7  # 0.5 + 10 * 0.05 = 1.0
+    assert graph.relations[0].strength <= 1.0  # Capped
+
+
+def test_hebbian_custom_growth_rate():
+    """Custom growth rate should be respected."""
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(file="self/a.md", type="health", title="A")
+    graph.entities["b"] = GraphEntity(file="self/b.md", type="health", title="B")
+
+    add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"))
+    add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"),
+                 strength_growth=0.1)
+
+    assert graph.relations[0].strength == 0.6  # 0.5 + 0.1
 
 
 def test_rebuild_from_md(tmp_path):

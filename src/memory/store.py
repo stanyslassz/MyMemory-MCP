@@ -67,13 +67,7 @@ def update_entity(
     if new_observations:
         existing_facts = sections.get("Facts", [])
         for obs in new_observations:
-            line = f"- [{obs['category']}] {obs['content']}"
-            if obs.get("tags"):
-                for tag in obs["tags"]:
-                    if tag.startswith("#"):
-                        line += f" {tag}"
-                    else:
-                        line += f" #{tag}"
+            line = _format_observation(obs)
             if not _is_duplicate_observation(line, existing_facts):
                 existing_facts.append(line)
         sections["Facts"] = existing_facts
@@ -113,7 +107,7 @@ def create_entity(
 
     if observations:
         for obs in observations:
-            line = f"- [{obs['category']}] {obs['content']}"
+            line = _format_observation(obs)
             sections["Facts"].append(line)
 
     if relations:
@@ -311,19 +305,76 @@ def _parse_sections(body: str) -> dict[str, list[str]]:
     return sections
 
 
+_VALENCE_MARKERS = {"positive": "[+]", "negative": "[-]", "neutral": "[~]"}
+_VALENCE_REVERSE = {v: k for k, v in _VALENCE_MARKERS.items()}
+
+
+def _format_observation(obs: dict) -> str:
+    """Format an observation dict to markdown line.
+
+    Format: - [category] (YYYY-MM) content [+] #tags
+    Date and valence are optional.
+    """
+    line = f"- [{obs['category']}]"
+    date = obs.get("date", "")
+    if date:
+        line += f" ({date})"
+    line += f" {obs['content']}"
+    valence = obs.get("valence", "")
+    if valence and valence in _VALENCE_MARKERS:
+        line += f" {_VALENCE_MARKERS[valence]}"
+    if obs.get("tags"):
+        for tag in obs["tags"]:
+            if tag.startswith("#"):
+                line += f" {tag}"
+            else:
+                line += f" #{tag}"
+    return line
+
+
+def _parse_observation(line: str) -> dict | None:
+    """Parse a markdown fact line back into a dict.
+
+    Handles: - [category] (date) content [+/-/~] #tags
+    """
+    m = re.match(r"- \[(\w+)\]\s*(?:\(([^)]+)\)\s*)?(.+)", line)
+    if not m:
+        return None
+    category = m.group(1)
+    date = m.group(2) or ""
+    rest = m.group(3).strip()
+
+    # Extract valence marker
+    valence = ""
+    for marker, val in _VALENCE_REVERSE.items():
+        if f" {marker}" in rest:
+            valence = val
+            rest = rest.replace(f" {marker}", "", 1).strip()
+            break
+
+    # Extract tags
+    tags = re.findall(r"#(\S+)", rest)
+    content = re.sub(r"\s*#\S+", "", rest).strip()
+
+    return {"category": category, "date": date, "content": content,
+            "valence": valence, "tags": tags}
+
+
 def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
-    """Check if an observation is a duplicate (same category + similar content)."""
-    # Extract category from line like "- [category] content"
-    new_match = re.match(r"- \[(\w+)\] (.+)", new_line)
-    if not new_match:
+    """Check if an observation is a duplicate (same category + similar content).
+
+    Ignores date/valence/tags in comparison — only category + content matter.
+    """
+    new_obs = _parse_observation(new_line)
+    if not new_obs:
         return False
-    new_cat, new_content = new_match.group(1), new_match.group(2).lower()
+    new_cat, new_content = new_obs["category"], new_obs["content"].lower()
 
     for existing in existing_lines:
-        ex_match = re.match(r"- \[(\w+)\] (.+)", existing)
-        if not ex_match:
+        ex_obs = _parse_observation(existing)
+        if not ex_obs:
             continue
-        ex_cat, ex_content = ex_match.group(1), ex_match.group(2).lower()
+        ex_cat, ex_content = ex_obs["category"], ex_obs["content"].lower()
         if new_cat == ex_cat and (new_content in ex_content or ex_content in new_content):
             return True
     return False

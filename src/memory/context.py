@@ -10,7 +10,21 @@ from src.core.llm import call_context_generation
 from src.core.models import GraphData, GraphEntity
 from src.memory.graph import get_related
 from src.memory.scoring import get_top_entities
-from src.memory.store import read_entity
+from src.memory.store import read_entity, _parse_observation
+
+
+def _sort_facts_by_date(facts: list[str]) -> list[str]:
+    """Sort facts by date (chronological). Undated facts go last, preserving order."""
+    dated: list[tuple[str, str]] = []
+    undated: list[str] = []
+    for fact in facts:
+        parsed = _parse_observation(fact)
+        if parsed and parsed["date"]:
+            dated.append((parsed["date"], fact))
+        else:
+            undated.append(fact)
+    dated.sort(key=lambda x: x[0])
+    return [f for _, f in dated] + undated
 
 
 def _estimate_tokens(text: str) -> int:
@@ -51,7 +65,9 @@ def _enrich_entity(
         section_lines.append(f"Tags: {', '.join(entity.tags)}")
     if facts:
         section_lines.append("Facts:")
-        for fact in facts:
+        # Sort facts by date (dated facts first chronologically, undated last)
+        sorted_facts = _sort_facts_by_date(facts)
+        for fact in sorted_facts:
             section_lines.append(f"  {fact}")
     if related_info:
         section_lines.append(f"Related: {', '.join(related_info)}")

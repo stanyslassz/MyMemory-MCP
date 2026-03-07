@@ -30,6 +30,24 @@ def test_raw_observation_invalid_category():
         RawObservation(category="invalid_cat", content="Test", importance=0.5)
 
 
+def test_raw_observation_date_and_valence():
+    obs = RawObservation(category="fact", content="Test", importance=0.5,
+                         date="2024-03", valence="positive")
+    assert obs.date == "2024-03"
+    assert obs.valence == "positive"
+
+
+def test_raw_observation_date_valence_defaults():
+    obs = RawObservation(category="fact", content="Test", importance=0.5)
+    assert obs.date == ""
+    assert obs.valence == ""
+
+
+def test_raw_observation_invalid_valence():
+    with pytest.raises(ValidationError):
+        RawObservation(category="fact", content="Test", importance=0.5, valence="happy")
+
+
 def test_raw_observation_importance_bounds():
     with pytest.raises(ValidationError):
         RawObservation(category="fact", content="Test", importance=1.5)

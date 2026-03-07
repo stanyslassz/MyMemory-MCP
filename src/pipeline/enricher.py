@@ -82,7 +82,7 @@ def enrich_memory(
 
             if from_slug and to_slug:
                 graph_rel = GraphRelation(from_entity=from_slug, to_entity=to_slug, type=rel.type, context=rel.context)
-                graph = add_relation(graph, graph_rel)
+                graph = add_relation(graph, graph_rel, strength_growth=config.scoring.relation_strength_growth)
                 report.relations_added += 1
 
                 # Also add relation text to the source entity MD
@@ -125,7 +125,8 @@ def _update_existing_entity(
 
     # Prepare observations
     new_obs = [
-        {"category": obs.category, "content": obs.content, "tags": obs.tags}
+        {"category": obs.category, "content": obs.content, "tags": obs.tags,
+         "date": obs.date, "valence": obs.valence}
         for obs in raw_entity.observations
     ]
 
@@ -187,7 +188,8 @@ def _create_new_entity(
     )
 
     observations = [
-        {"category": obs.category, "content": obs.content}
+        {"category": obs.category, "content": obs.content,
+         "date": obs.date, "valence": obs.valence}
         for obs in raw_entity.observations
     ]
 

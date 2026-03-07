@@ -151,6 +151,60 @@ def test_list_entities(tmp_path):
     assert len(entities) == 2
 
 
+def test_observation_with_date_and_valence(tmp_path):
+    """Observations with date and valence should be stored in the expected format."""
+    fm = EntityFrontmatter(title="DateTest", type="health", created="2026-01-01", last_mentioned="2026-01-01")
+    filepath = tmp_path / "moi" / "date-test.md"
+    write_entity(filepath, fm, {"Facts": [], "Relations": [], "History": []})
+
+    update_entity(filepath, new_observations=[
+        {"category": "diagnosis", "content": "Endometriosis diagnosed", "tags": ["health"],
+         "date": "2024-03", "valence": "negative"},
+        {"category": "fact", "content": "Started yoga", "tags": [],
+         "date": "", "valence": "positive"},
+        {"category": "fact", "content": "Regular checkups", "tags": [],
+         "date": "2025-11-15", "valence": ""},
+    ])
+
+    _, sections = read_entity(filepath)
+    facts = sections["Facts"]
+    assert len(facts) == 3
+    assert "(2024-03)" in facts[0]
+    assert "[-]" in facts[0]
+    assert "[+]" in facts[1]
+    assert "(2025-11-15)" in facts[2]
+
+
+def test_create_entity_with_date_valence(tmp_path):
+    """create_entity should format observations with date and valence."""
+    fm = EntityFrontmatter(title="New", type="health", created="2026-01-01", last_mentioned="2026-01-01")
+    path = create_entity(
+        tmp_path, "moi", "new", fm,
+        observations=[
+            {"category": "fact", "content": "Some fact", "date": "2025-06", "valence": "positive"},
+        ],
+    )
+    _, sections = read_entity(path)
+    assert "(2025-06)" in sections["Facts"][0]
+    assert "[+]" in sections["Facts"][0]
+
+
+def test_duplicate_observation_ignores_date_valence(tmp_path):
+    """Duplicate check should match on category+content, ignoring date/valence."""
+    fm = EntityFrontmatter(title="Dup2", type="health", created="2026-01-01", last_mentioned="2026-01-01")
+    filepath = tmp_path / "moi" / "dup2.md"
+    write_entity(filepath, fm, {
+        "Facts": ["- [fact] (2024-03) Existing fact [+]"],
+        "Relations": [], "History": [],
+    })
+    update_entity(filepath, new_observations=[
+        {"category": "fact", "content": "Existing fact", "tags": [],
+         "date": "2025-01", "valence": "negative"},
+    ])
+    _, sections = read_entity(filepath)
+    assert len(sections["Facts"]) == 1  # Not duplicated
+
+
 def test_duplicate_observation_skipped(tmp_path):
     fm = EntityFrontmatter(title="Dup Test", type="health", created="2026-01-01", last_mentioned="2026-01-01")
     filepath = tmp_path / "moi" / "dup.md"

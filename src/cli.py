@@ -75,19 +75,6 @@ def run(ctx):
             mark_chat_processed(chat_path, [], [])
             continue
 
-        # NLP pre-filter (optional)
-        nlp_hints = {}
-        if config.nlp.enabled:
-            from src.pipeline.nlp_prefilter import is_available
-            if is_available():
-                from src.pipeline.nlp_prefilter import extract_dates, extract_entities
-                if config.nlp.date_extraction:
-                    nlp_hints["dates"] = extract_dates(content)
-                if config.nlp.pre_ner:
-                    nlp_hints["entities"] = extract_entities(content)
-                if nlp_hints.get("dates") or nlp_hints.get("entities"):
-                    console.print(f"  [dim]NLP: {len(nlp_hints.get('dates', []))} dates, {len(nlp_hints.get('entities', []))} entities[/dim]")
-
         try:
             extraction = extract_from_chat(content, config)
             console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")

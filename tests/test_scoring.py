@@ -195,6 +195,33 @@ def test_get_top_entities():
     assert "high" in ids
 
 
+def test_hebbian_strength_boosts_spreading():
+    """Relations with higher strength from Hebbian learning should produce stronger spreading."""
+    config = _make_config()
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["hub"] = GraphEntity(
+        file="self/hub.md", type="health", title="Hub",
+        importance=0.9, mention_dates=["2026-03-05"] * 10,
+    )
+    graph.entities["weak_link"] = GraphEntity(
+        file="self/wl.md", type="health", title="WeakLink",
+        importance=0.1, mention_dates=["2025-01-01"],
+    )
+    graph.entities["strong_link"] = GraphEntity(
+        file="self/sl.md", type="health", title="StrongLink",
+        importance=0.1, mention_dates=["2025-01-01"],
+    )
+    graph.relations = [
+        GraphRelation(from_entity="hub", to_entity="weak_link", type="affects",
+                      strength=0.5, last_reinforced="2026-03-05"),
+        GraphRelation(from_entity="hub", to_entity="strong_link", type="affects",
+                      strength=0.9, last_reinforced="2026-03-05"),  # Hebbian-reinforced
+    ]
+    spreading = spreading_activation(graph, config, today)
+    assert spreading["strong_link"] > spreading["weak_link"]
+
+
 def test_get_top_entities_min_score():
     graph = GraphData()
     graph.entities["high"] = GraphEntity(

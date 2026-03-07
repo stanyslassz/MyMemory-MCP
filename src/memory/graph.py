@@ -94,7 +94,7 @@ def update_entity(graph: GraphData, entity_id: str, **updates) -> GraphData:
     return graph
 
 
-def add_relation(graph: GraphData, relation: GraphRelation) -> GraphData:
+def add_relation(graph: GraphData, relation: GraphRelation, *, strength_growth: float = 0.05) -> GraphData:
     """Add a relation, or reinforce existing duplicate (same from+to+type)."""
     for existing in graph.relations:
         if (existing.from_entity == relation.from_entity
@@ -103,6 +103,8 @@ def add_relation(graph: GraphData, relation: GraphRelation) -> GraphData:
             # Reinforce existing relation
             existing.mention_count += 1
             existing.last_reinforced = datetime.now().isoformat()
+            # Hebbian: strength grows with co-activation, capped at 1.0
+            existing.strength = min(1.0, existing.strength + strength_growth)
             if relation.context and not existing.context:
                 existing.context = relation.context
             return graph

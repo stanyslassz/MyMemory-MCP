@@ -34,6 +34,8 @@ class RawObservation(BaseModel):
     content: str
     importance: float = Field(ge=0, le=1)
     tags: list[str] = Field(default_factory=list)
+    date: str = ""  # Optional ISO date, e.g. "2024-03" or "2024-03-15"
+    valence: Literal["positive", "negative", "neutral", ""] = ""
 
 
 class RawEntity(BaseModel):
