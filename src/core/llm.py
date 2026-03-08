@@ -15,7 +15,7 @@ import litellm
 from pydantic import BaseModel
 
 from src.core.config import Config, LLMStepConfig
-from src.core.models import EntityResolution, RawExtraction
+from src.core.models import EntityResolution, FactConsolidation, RawExtraction
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -250,6 +250,23 @@ def call_context_generation(enriched_data: str, config: Config) -> str:
     response = litellm.completion(**kwargs)
     text = response.choices[0].message.content or ""
     return strip_thinking(text)
+
+
+def call_fact_consolidation(
+    entity_title: str,
+    entity_type: str,
+    facts_text: str,
+    config: Config,
+) -> FactConsolidation:
+    """Consolidate redundant observations for an entity via LLM."""
+    prompt = load_prompt(
+        "consolidate_facts",
+        config,
+        entity_title=entity_title,
+        entity_type=entity_type,
+        facts_text=facts_text,
+    )
+    return _call_structured(config.llm_context, prompt, FactConsolidation)
 
 
 def call_entity_summary(

@@ -16,7 +16,7 @@ from src.core.models import (
 from src.memory.context import write_index
 from src.memory.graph import add_entity, add_relation, load_graph, save_graph
 from src.memory.scoring import recalculate_all_scores
-from src.memory.store import create_entity, create_stub_entity, update_entity
+from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, write_entity
 from src.pipeline.resolver import slugify
 
 
@@ -122,6 +122,18 @@ def _update_existing_entity(
     if not filepath.exists():
         report.errors.append(f"File not found for entity {entity_id}: {entity_meta.file}")
         return
+
+    # Handle supersession: mark old facts before adding new ones
+    superseding_obs = [obs for obs in raw_entity.observations if obs.supersedes]
+    if superseding_obs:
+        frontmatter, sections = read_entity(filepath)
+        existing_facts = sections.get("Facts", [])
+        for obs in superseding_obs:
+            existing_facts = mark_observation_superseded(
+                existing_facts, obs.category, obs.supersedes,
+            )
+        sections["Facts"] = existing_facts
+        write_entity(filepath, frontmatter, sections)
 
     # Prepare observations
     new_obs = [

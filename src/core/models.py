@@ -36,6 +36,7 @@ class RawObservation(BaseModel):
     tags: list[str] = Field(default_factory=list)
     date: str = ""  # Optional ISO date, e.g. "2024-03" or "2024-03-15"
     valence: Literal["positive", "negative", "neutral", ""] = ""
+    supersedes: str = ""  # brief description of the old fact this replaces
 
 
 class RawEntity(BaseModel):
@@ -201,3 +202,18 @@ class IngestJob(BaseModel):
     error: Optional[str] = None
     chunks_indexed: int = 0
     route: Optional[RouteType] = None
+
+
+# ── Fact consolidation (LLM-based) ─────────────────────────
+
+class ConsolidatedFact(BaseModel):
+    category: ObservationCategory
+    content: str
+    date: str = ""
+    valence: Literal["positive", "negative", "neutral", ""] = ""
+    tags: list[str] = Field(default_factory=list)
+    replaces_indices: list[int] = Field(default_factory=list)
+
+
+class FactConsolidation(BaseModel):
+    consolidated: list[ConsolidatedFact]

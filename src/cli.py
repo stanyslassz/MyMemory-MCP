@@ -498,10 +498,17 @@ def replay(ctx, list_only):
 
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Preview duplicates without merging")
+@click.option("--facts", is_flag=True, help="Consolidate redundant observations within entities via LLM")
+@click.option("--min-facts", default=8, help="Minimum facts to trigger consolidation (default: 8)")
 @click.pass_context
-def consolidate(ctx, dry_run):
-    """Detect and report duplicate entities."""
+def consolidate(ctx, dry_run, facts, min_facts):
+    """Detect and report duplicate entities, or consolidate facts within entities."""
     config = ctx.obj["config"]
+
+    if facts:
+        _consolidate_facts(config, dry_run, min_facts)
+        return
+
     from src.memory.graph import load_graph
     from collections import defaultdict
 
@@ -533,6 +540,55 @@ def consolidate(ctx, dry_run):
 
     if dry_run:
         console.print(f"\n[dim]Dry run -- no changes made. Run without --dry-run to merge.[/dim]")
+
+
+def _consolidate_facts(config, dry_run: bool, min_facts: int) -> None:
+    """Consolidate redundant observations within entities via LLM."""
+    from src.memory.graph import load_graph
+    from src.memory.store import read_entity, consolidate_entity_facts
+
+    graph = load_graph(config.memory_path)
+    memory_path = config.memory_path
+
+    # Find entities with enough facts to warrant consolidation
+    candidates = []
+    for eid, entity in graph.entities.items():
+        entity_path = memory_path / entity.file
+        if not entity_path.exists():
+            continue
+        try:
+            _, sections = read_entity(entity_path)
+            facts = sections.get("Facts", [])
+            live_facts = [f for f in facts if "[superseded]" not in f]
+            if len(live_facts) >= min_facts:
+                candidates.append((eid, entity, entity_path, len(live_facts)))
+        except Exception:
+            continue
+
+    if not candidates:
+        console.print(f"[green]No entities with {min_facts}+ facts to consolidate.[/green]")
+        return
+
+    console.print(f"[bold]Found {len(candidates)} entity/ies with {min_facts}+ facts:[/bold]")
+    for eid, entity, _, fact_count in candidates:
+        console.print(f"  {entity.title} ({entity.type}): {fact_count} facts")
+
+    if dry_run:
+        console.print(f"\n[dim]Dry run -- no changes made. Run without --dry-run to consolidate.[/dim]")
+        return
+
+    for eid, entity, entity_path, _ in candidates:
+        console.print(f"\n[cyan]→ Consolidating {entity.title}...[/cyan]")
+        try:
+            result = consolidate_entity_facts(entity_path, config)
+            if result["changes"]:
+                console.print(f"  [green]{', '.join(result['changes'])}[/green]")
+            else:
+                console.print(f"  [dim]No changes needed[/dim]")
+        except Exception as e:
+            console.print(f"  [red]Failed: {e}[/red]")
+
+    console.print("\n[bold green]Fact consolidation complete.[/bold green]")
 
 
 def _make_faiss_fn(config, memory_path):

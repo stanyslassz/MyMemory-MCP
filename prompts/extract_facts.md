@@ -16,6 +16,11 @@ Rules:
   in YYYY-MM or YYYY-MM-DD format. Leave empty if no date is identifiable.
 - For each observation, indicate emotional valence: "positive", "negative", or "neutral".
   Leave empty if uncertain or truly neutral.
+- If the user corrects or contradicts a previous statement ("actually not X",
+  "I was wrong about Y", "in fact Z instead"), set the "supersedes" field to
+  a brief description of the old fact being replaced. Example: if the user says
+  "actually I'm going to La Rosière, not Toulouse", the new observation should have
+  supersedes: "ski à Toulouse". Leave empty when there is no correction.
 - Also extract interaction style observations: how the user likes to be responded to,
   what formats they prefer, what annoys them. Store these as entity "AI Personality"
   with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
@@ -38,16 +43,16 @@ Here is an example of the expected JSON format (do NOT copy this data — extrac
       "name": "Marie",
       "type": "person",
       "observations": [
-        {"category": "fact", "content": "Travaille chez Airbus", "importance": 0.6, "tags": ["travail"], "date": "2024-09", "valence": ""},
-        {"category": "preference", "content": "Aime le yoga", "importance": 0.3, "tags": ["sport"], "date": "", "valence": "positive"}
+        {"category": "fact", "content": "Travaille chez Airbus", "importance": 0.6, "tags": ["travail"], "date": "2024-09", "valence": "", "supersedes": ""},
+        {"category": "preference", "content": "Aime le yoga", "importance": 0.3, "tags": ["sport"], "date": "", "valence": "positive", "supersedes": ""}
       ]
     },
     {
       "name": "AI Personality",
       "type": "ai_self",
       "observations": [
-        {"category": "ai_style", "content": "User prefers direct answers without filler", "importance": 0.7, "tags": ["communication"], "date": "", "valence": ""},
-        {"category": "user_reaction", "content": "User liked the comparative table format", "importance": 0.5, "tags": ["format"], "date": "", "valence": "positive"}
+        {"category": "ai_style", "content": "User prefers direct answers without filler", "importance": 0.7, "tags": ["communication"], "date": "", "valence": "", "supersedes": ""},
+        {"category": "user_reaction", "content": "User liked the comparative table format", "importance": 0.5, "tags": ["format"], "date": "", "valence": "positive", "supersedes": ""}
       ]
     }
   ],

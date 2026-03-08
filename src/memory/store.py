@@ -165,6 +165,71 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
     return results
 
 
+def consolidate_entity_facts(
+    filepath: Path,
+    config,
+) -> dict:
+    """Consolidate redundant observations in an entity via LLM.
+
+    Returns a dict with 'original_count', 'consolidated_count', 'changes'.
+    """
+    from src.core.llm import call_fact_consolidation
+
+    frontmatter, sections = read_entity(filepath)
+    facts = sections.get("Facts", [])
+    if not facts:
+        return {"original_count": 0, "consolidated_count": 0, "changes": []}
+
+    # Filter out already superseded facts — only consolidate live ones
+    live_facts = [f for f in facts if "[superseded]" not in f]
+    superseded_facts = [f for f in facts if "[superseded]" in f]
+
+    if len(live_facts) < 3:
+        return {"original_count": len(live_facts), "consolidated_count": len(live_facts), "changes": []}
+
+    # Build indexed text for LLM
+    indexed_text = "\n".join(f"{i}: {f}" for i, f in enumerate(live_facts))
+
+    result = call_fact_consolidation(
+        frontmatter.title, frontmatter.type, indexed_text, config,
+    )
+
+    # Build new facts list from consolidated result
+    new_facts = []
+    for cf in result.consolidated:
+        obs = {
+            "category": cf.category,
+            "content": cf.content,
+            "date": cf.date,
+            "valence": cf.valence,
+            "tags": cf.tags,
+        }
+        new_facts.append(_format_observation(obs))
+
+    # Preserve superseded facts
+    new_facts.extend(superseded_facts)
+
+    changes = []
+    if len(new_facts) != len(facts):
+        changes.append(f"{len(live_facts)} → {len(result.consolidated)} live facts")
+
+    sections["Facts"] = new_facts
+
+    # Log in History
+    from datetime import date
+    history = sections.get("History", [])
+    history.append(f"- {date.today().isoformat()}: Facts consolidated ({len(live_facts)} → {len(result.consolidated)})")
+    sections["History"] = history
+
+    write_entity(filepath, frontmatter, sections)
+
+    return {
+        "original_count": len(live_facts),
+        "consolidated_count": len(result.consolidated),
+        "changes": changes,
+    }
+
+
 def save_chat(messages: list[dict], memory_path: Path) -> Path:
     """Save a conversation to chats/ with processed: false."""
     chats_dir = memory_path / "chats"
@@ -314,12 +379,17 @@ def _format_observation(obs: dict) -> str:
 
     Format: - [category] (YYYY-MM) content [+] #tags
     Date and valence are optional.
+    Superseded observations are wrapped in ~~ and suffixed with [superseded].
     """
+    is_superseded = obs.get("superseded", False)
+    content = obs['content']
+    if is_superseded:
+        content = f"~~{content}~~"
     line = f"- [{obs['category']}]"
     date = obs.get("date", "")
     if date:
         line += f" ({date})"
-    line += f" {obs['content']}"
+    line += f" {content}"
     valence = obs.get("valence", "")
     if valence and valence in _VALENCE_MARKERS:
         line += f" {_VALENCE_MARKERS[valence]}"
@@ -329,13 +399,15 @@ def _format_observation(obs: dict) -> str:
                 line += f" {tag}"
             else:
                 line += f" #{tag}"
+    if is_superseded:
+        line += " [superseded]"
     return line
 
 
 def _parse_observation(line: str) -> dict | None:
     """Parse a markdown fact line back into a dict.
 
-    Handles: - [category] (date) content [+/-/~] #tags
+    Handles: - [category] (date) content [+/-/~] #tags [superseded]
     """
     m = re.match(r"- \[(\w+)\]\s*(?:\(([^)]+)\)\s*)?(.+)", line)
     if not m:
@@ -343,6 +415,11 @@ def _parse_observation(line: str) -> dict | None:
     category = m.group(1)
     date = m.group(2) or ""
     rest = m.group(3).strip()
+
+    # Detect superseded marker
+    superseded = "[superseded]" in rest
+    if superseded:
+        rest = rest.replace("[superseded]", "").strip()
 
     # Extract valence marker
     valence = ""
@@ -356,14 +433,22 @@ def _parse_observation(line: str) -> dict | None:
     tags = re.findall(r"#(\S+)", rest)
     content = re.sub(r"\s*#\S+", "", rest).strip()
 
-    return {"category": category, "date": date, "content": content,
-            "valence": valence, "tags": tags}
+    # Strip strikethrough markers from content
+    if superseded:
+        content = content.strip("~")
+
+    result = {"category": category, "date": date, "content": content,
+              "valence": valence, "tags": tags}
+    if superseded:
+        result["superseded"] = True
+    return result
 
 
 def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
     """Check if an observation is a duplicate (same category + similar content).
 
     Ignores date/valence/tags in comparison — only category + content matter.
+    Skips superseded lines when checking for duplicates.
     """
     new_obs = _parse_observation(new_line)
     if not new_obs:
@@ -374,7 +459,33 @@ def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
         ex_obs = _parse_observation(existing)
         if not ex_obs:
             continue
+        if ex_obs.get("superseded"):
+            continue
         ex_cat, ex_content = ex_obs["category"], ex_obs["content"].lower()
         if new_cat == ex_cat and (new_content in ex_content or ex_content in new_content):
             return True
     return False
+
+
+def mark_observation_superseded(
+    existing_facts: list[str],
+    category: str,
+    supersedes_text: str,
+) -> list[str]:
+    """Find and mark a matching observation as superseded.
+
+    Searches for a fact with the same category whose content contains
+    the supersedes_text (case-insensitive). Returns updated list.
+    """
+    supersedes_lower = supersedes_text.lower()
+    result = []
+    for line in existing_facts:
+        obs = _parse_observation(line)
+        if (obs and not obs.get("superseded")
+                and obs["category"] == category
+                and supersedes_lower in obs["content"].lower()):
+            obs["superseded"] = True
+            result.append(_format_observation(obs))
+        else:
+            result.append(line)
+    return result

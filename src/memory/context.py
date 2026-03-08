@@ -27,6 +27,76 @@ def _sort_facts_by_date(facts: list[str]) -> list[str]:
     return [f for _, f in dated] + undated
 
 
+_STOPWORDS = frozenset(
+    # French
+    "le la les un une des de du d l et en pour aux avec sans par sur dans "
+    "qui que qu est sont a au ce cette ces sa son ses se ne pas ni si "
+    "on nous vous il elle ils elles "
+    # English
+    "the a an is are was were be been being have has had do does did "
+    "will would shall should can could may might must "
+    "i me my we our you your he him his she her it its they them their "
+    "and or but not no nor so if then than that this these those "
+    "in on at to for of by from with as into about up out".split()
+)
+
+
+def _trigrams(text: str) -> set[str]:
+    """Return the set of character trigrams from text."""
+    return {text[i:i + 3] for i in range(len(text) - 2)}
+
+
+def _content_similarity(text_a: str, text_b: str) -> float:
+    """Blended similarity: 50% stopword-filtered word Jaccard + 50% trigram Jaccard."""
+    words_a = {w for w in text_a.lower().split() if w not in _STOPWORDS and len(w) > 1}
+    words_b = {w for w in text_b.lower().split() if w not in _STOPWORDS and len(w) > 1}
+    if not words_a or not words_b:
+        return 0.0
+    word_jaccard = len(words_a & words_b) / len(words_a | words_b)
+    tri_a = _trigrams(" ".join(sorted(words_a)))
+    tri_b = _trigrams(" ".join(sorted(words_b)))
+    tri_union = tri_a | tri_b
+    tri_jaccard = len(tri_a & tri_b) / len(tri_union) if tri_union else 0.0
+    return 0.5 * word_jaccard + 0.5 * tri_jaccard
+
+
+def _deduplicate_facts_for_context(
+    facts: list[str], threshold: float = 0.35, max_per_category: int = 5,
+) -> list[str]:
+    """Drop near-duplicate facts within same category using blended similarity.
+
+    Uses stopword-filtered word Jaccard + character trigram overlap.
+    After dedup, caps each category to max_per_category (first occurrence wins).
+    Preserves input order — only removes later duplicates.
+    """
+    kept_by_cat: dict[str, list[dict]] = {}
+    cat_counts: dict[str, int] = {}
+    result = []
+    for line in facts:
+        obs = _parse_observation(line)
+        if not obs:
+            result.append(line)
+            continue
+        cat = obs["category"]
+        content = obs["content"]
+        # Check duplicate against kept facts in same category
+        is_dup = False
+        for kept_obs in kept_by_cat.get(cat, []):
+            if _content_similarity(content, kept_obs["content"]) > threshold:
+                is_dup = True
+                break
+        if is_dup:
+            continue
+        # Check category cap
+        count = cat_counts.get(cat, 0)
+        if count >= max_per_category:
+            continue
+        result.append(line)
+        kept_by_cat.setdefault(cat, []).append(obs)
+        cat_counts[cat] = count + 1
+    return result
+
+
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: words * 1.3."""
     return int(len(text.split()) * 1.3)
@@ -65,8 +135,10 @@ def _enrich_entity(
         section_lines.append(f"Tags: {', '.join(entity.tags)}")
     if facts:
         section_lines.append("Facts:")
-        # Sort facts by date (dated facts first chronologically, undated last)
+        # Filter superseded facts, sort by date, deduplicate for context
+        facts = [f for f in facts if "[superseded]" not in f]
         sorted_facts = _sort_facts_by_date(facts)
+        sorted_facts = _deduplicate_facts_for_context(sorted_facts)
         for fact in sorted_facts:
             section_lines.append(f"  {fact}")
     if related_info:
