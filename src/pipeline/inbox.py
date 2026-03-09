@@ -47,20 +47,33 @@ def process_inbox(memory_path: Path, config: Config) -> list[str]:
     for filepath in sorted(inbox_path.iterdir()):
         if filepath.is_dir():
             continue
-        if filepath.suffix not in (".md", ".txt"):
+        if filepath.suffix not in (".md", ".txt", ".json"):
             continue
 
         try:
-            content = filepath.read_text(encoding="utf-8")
-            if not content.strip():
-                continue
-
-            if not config.features.doc_pipeline:
-                # Legacy path: all files → pseudo-chat
-                _legacy_ingest(content, memory_path)
+            # JSON files: split multi-conversation exports into individual chats
+            if filepath.suffix == ".json":
+                from src.pipeline.chat_splitter import split_export_json
+                saved = split_export_json(filepath, memory_path)
+                if not saved:
+                    # Fallback: treat as document
+                    content = filepath.read_text(encoding="utf-8")
+                    if content.strip() and config.features.doc_pipeline:
+                        _routed_ingest(filepath.name, content, memory_path, config)
+                    elif content.strip():
+                        _legacy_ingest(content, memory_path)
+                logger.info("JSON import: %d conversation(s) from %s", len(saved), filepath.name)
             else:
-                # P1.1: Route and split
-                _routed_ingest(filepath.name, content, memory_path, config)
+                content = filepath.read_text(encoding="utf-8")
+                if not content.strip():
+                    continue
+
+                if not config.features.doc_pipeline:
+                    # Legacy path: all files → pseudo-chat
+                    _legacy_ingest(content, memory_path)
+                else:
+                    # P1.1: Route and split
+                    _routed_ingest(filepath.name, content, memory_path, config)
 
             # Move to _processed/
             dest = processed_path / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filepath.name}"
