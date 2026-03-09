@@ -44,3 +44,4 @@ config.claude-desktop.yaml
 
 # ── Worktrees ──
 .worktrees/
+config copy.bkp
