@@ -1,380 +1,456 @@
-# memory-ai
+<div align="center">
 
-**A personal adaptive memory system for LLMs — like a human brain, but for your AI.**
+# 🧠 memory-ai
 
-memory-ai saves your conversations, extracts structured knowledge in the background, scores it with cognitive science algorithms, and builds a living context file that gets injected into future chats. The result: your AI remembers what matters, forgets what doesn't, and can recall dormant memories when they become relevant again.
+**A cognitive memory system for LLMs — modeled after the human brain.**
 
-Open-source. Local-first. Local LLMs. Not a product — a brain.
+*Your AI doesn't just store conversations. It learns, forgets, and remembers — like you do.*
 
----
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.io/)
 
-## Architecture
-
-> [View the full interactive architecture diagram on Excalidraw](https://excalidraw.com/#json=HhxHYjjxa--HWXq3YavWR,fYAW4qfWUDF5rQvwvM53-A)
-
-```
-Chat text
-  |
-  v
-[spaCy pre-filter] -- dates, NER hints, dedup signals
-  |
-  v
-Extractor (LLM) --> RawExtraction (entities, relations, observations)
-  |
-  v
-Resolver (slug + alias + FAISS similarity) --> resolved / ambiguous / new
-  |
-  v
-Arbitrator (LLM, ambiguous only) --> EntityResolution
-  |
-  v
-Enricher
-  |-- Write/update Markdown entity files
-  |-- Update _graph.json (enriched relations: strength, dates, context)
-  |-- Recalculate ACT-R scores + spreading activation
-  |-- Update mention_dates (windowed) + monthly_buckets
-  |
-  v
-Context Builder (deterministic template, zero LLM)
-  |-- Top entities by ACT-R score with summaries
-  |-- Vigilances section
-  |-- Available in memory (entities below threshold)
-  |-- Weighted tags cloud
-  |
-  v
-FAISS Indexer (incremental)
-  |
-  v
-MCP Server
-  |-- get_context()  --> _context.md
-  |-- save_chat()    --> store + queue for pipeline
-  |-- search_rag()   --> FAISS + re-ranking + L2->L1 promotion
-```
+</div>
 
 ---
 
-## How It Works
+## Why memory-ai?
 
-### 1. Save a conversation
-When you chat with your AI, the conversation is saved via MCP's `save_chat()` tool and queued for background processing.
+Most AI memory systems dump everything into a vector database and call it a day. memory-ai takes a radically different approach: it models memory **the way cognitive science says human brains actually work**.
 
-### 2. Extract knowledge
-The pipeline runs each chat through an LLM extractor that identifies **entities** (people, projects, health topics...), **relations** between them, and **observations** (facts, preferences, decisions...).
+The result? Your AI remembers what matters, naturally forgets what doesn't, and can recall dormant memories when they become relevant again. Not a product — a brain.
 
-### 3. Resolve & enrich
-A deterministic resolver matches extracted entities against known ones using slug matching, aliases, and FAISS semantic similarity. Only truly ambiguous cases go to the LLM arbitrator. The enricher then updates Markdown files and the knowledge graph.
-
-### 4. Score with cognitive science
-Every entity gets a score using **ACT-R Base-Level Activation** — the same mathematical model cognitive scientists use to model human memory:
-
-```
-B = ln(sum of t_j^(-d))    # power-law decay over all mention dates
-S = sum(w_ij * A_j)         # spreading activation from connected entities
-score = sigmoid(B + wS)     # normalized to [0, 1]
-```
-
-**Key properties:**
-- 5 mentions in 2 days (burst) scores higher than 5 mentions over 5 months
-- Entities connected to active ones get a boost (spreading activation)
-- Unused memories naturally decay — just like human forgetting
-- But they're never truly lost (see: re-emergence below)
-
-### 5. Build living context
-A deterministic template assembles the context file — no LLM involved, fully reproducible:
-
-```markdown
-# Memory Context -- 2026-03-05
-
-## Identity
-{summary of "self" entity}
-
-## Top of mind
-{top N entities by score, with summaries}
-
-## Vigilances
-{health diagnoses, treatments to watch}
-
-## Work & Projects
-{active work and projects}
-
-## Close ones
-{people and pets}
-
-## Available in memory (not detailed above)
-alice (person, 0.42) | renovation (project, 0.38) | python (interest, 0.35)
-
-## Memory tags
-#health(0.8) #work(0.7) #family(0.9) #renovation(0.4) ...
-```
-
-### 6. Re-emergence: memories come back
-When `search_rag()` retrieves an entity from FAISS, it **bumps its mention_dates** — just like recalling a memory strengthens it. The entity's ACT-R score naturally rises, and it can re-enter the context file in future builds. No special logic needed — pure mnemonic reinforcement.
+> **Local-first. Markdown-based. Works with any LLM.**
 
 ---
 
-## 3-Level Memory
+## How the Brain Works
 
-| Level | Storage | Purpose |
-|-------|---------|---------|
-| **L1** — Context | `_context.md` | Active memories injected into every conversation |
-| **L2** — FAISS | Vector index | Searchable via RAG, can promote back to L1 |
-| **L3** — Archive | Markdown files | Full knowledge base, source of truth |
+### The Pipeline — From Chat to Cognition
 
-The flow **L2 -> L1** (re-emergence) is what makes this adaptive: a dormant memory retrieved by RAG gets reinforced and naturally bubbles back into active context.
+```
+                        ┌─────────────────────────────────────────┐
+                        │              Your Chat                  │
+                        └───────────────┬─────────────────────────┘
+                                        │
+                                        ▼
+                        ┌───────────────────────────────┐
+                        │   1. Extractor (LLM)          │
+                        │   Entities, relations, facts   │
+                        └───────────────┬───────────────┘
+                                        │
+                                        ▼
+                        ┌───────────────────────────────┐
+                        │   2. Resolver (deterministic)  │
+                        │   Slug + alias + FAISS match   │
+                        └───────────────┬───────────────┘
+                                        │
+                          ┌─────────────┴─────────────┐
+                          │ ambiguous?                 │
+                          ▼                           ▼
+                ┌──────────────────┐        ┌──────────────┐
+                │ 3. Arbitrator    │        │   Resolved   │
+                │    (LLM)        │        │              │
+                └────────┬────────┘        └──────┬───────┘
+                          │                        │
+                          └──────────┬─────────────┘
+                                     ▼
+                        ┌───────────────────────────────┐
+                        │   4. Enricher                  │
+                        │   Write MD + Graph + ACT-R     │
+                        └───────────────┬───────────────┘
+                                        │
+                          ┌─────────────┴─────────────┐
+                          ▼                           ▼
+                ┌──────────────────┐        ┌──────────────────┐
+                │ 5. Context       │        │ 6. FAISS Index   │
+                │    Builder       │        │    (incremental)  │
+                │  (zero LLM)     │        │                   │
+                └────────┬────────┘        └──────┬────────────┘
+                          │                        │
+                          └──────────┬─────────────┘
+                                     ▼
+                        ┌───────────────────────────────┐
+                        │       MCP Server              │
+                        │  get_context · save_chat      │
+                        │       search_rag              │
+                        └───────────────────────────────┘
+```
+
+Each step is designed to minimize LLM calls. Only extraction and ambiguous arbitration touch the LLM — everything else is deterministic, fast, and reproducible.
 
 ---
 
-## Enriched Knowledge Graph
+## The Science Behind It
 
-Entities and relations are stored in `_graph.json` with rich metadata:
+### ACT-R: How Human Memory Works
 
-**Entities** carry:
-- `mention_dates` — last 50 precise dates (powers ACT-R)
-- `monthly_buckets` — older mentions aggregated by month (`{"2025-06": 10}`)
-- `importance` — LLM-assessed significance (0-1)
-- `retention` — `permanent` | `long_term` | `short_term`
-- `summary` — pre-computed LLM summary (regenerated only when facts change)
+memory-ai uses **ACT-R** (Adaptive Control of Thought—Rational), the gold standard cognitive architecture from psychology research. The same math that models how humans remember and forget.
 
-**Relations** carry:
-- `strength` — 0.0 to 1.0, grows logarithmically with co-mentions
-- `last_reinforced` — decays with 6-month half-life if not reinforced
-- `mention_count` — number of co-occurrences
-- `context` — preserved from original extraction
+#### Base-Level Activation — The Forgetting Curve
+
+```
+B = ln( Σ tⱼ⁻ᵈ )
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| `tⱼ` | Days since each mention (minimum 0.5) |
+| `d` | Decay factor: `0.5` for long-term, `0.8` for short-term |
+| `B` | Base activation — how accessible the memory is |
+
+**What this means in practice:**
+- 5 mentions in 2 days → high score (burst = importance)
+- 5 mentions over 5 months → lower score (spread out = less urgent)
+- A memory mentioned yesterday and 6 months ago → yesterday dominates
+- Unused memories decay following a power law — just like human forgetting
+
+#### Spreading Activation — Associative Recall
+
+```
+S = Σ( strengthᵢ × base_scoreᵢ ) / total_strength
+```
+
+When you think about **Paris**, **France** lights up too. That's spreading activation. In memory-ai, entities connected by relations boost each other's scores:
+
+- Your project "Kitchen Renovation" is active → **contractor**, **budget**, **timeline** all get a boost
+- You mention your **dog** → **veterinarian** and **dog park** become more accessible
+- Unused connections fade over time (180-day half-life)
+
+#### Hebbian Learning — "Neurons That Fire Together Wire Together"
+
+```
+strength = min(1.0, strength + 0.05)    # Each co-occurrence
+effective = strength × e^(-days / 180)   # Time decay
+```
+
+When two entities appear together in conversation, their connection strengthens. Stop mentioning them together, and the connection fades. Exactly like synaptic plasticity in the brain.
+
+#### The Final Score
+
+```
+score = σ(B + importance × w₁ + spreading × w₂)
+```
+
+A sigmoid function normalizes everything to `[0, 1]`. The highest-scoring entities make it into your context — the rest remain in long-term storage, searchable but not actively loaded.
+
+---
+
+## Three-Level Memory — Like the Human Brain
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│   L1: Working Memory      _context.md                      │
+│   ━━━━━━━━━━━━━━━━━━━     Injected into every conversation │
+│   Top entities by ACT-R   Token-budgeted sections          │
+│   score. Always present.  Deterministic, reproducible.     │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   L2: Semantic Memory      FAISS Vector Index              │
+│   ━━━━━━━━━━━━━━━━━━━     Searchable via RAG              │
+│   All indexed entities.   Retrieval bumps mention_dates    │
+│   Dormant but findable.   → promotes back to L1 ↑         │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   L3: Episodic Memory      Markdown Files                  │
+│   ━━━━━━━━━━━━━━━━━━━     Full knowledge base             │
+│   Source of truth.        Every fact, date, relation.      │
+│   Never deleted.          Human-readable & editable.       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Re-Emergence: Memories Come Back
+
+The killer feature. When `search_rag()` retrieves a dormant entity from L2, it **bumps its mention_dates** — just like recalling a memory strengthens it in the brain. The entity's ACT-R score rises, and it naturally re-enters L1 context. No special logic needed — pure mnemonic reinforcement.
+
+> You haven't thought about your **swimming routine** in months. It decayed out of L1. Then you ask about back pain — RAG retrieves swimming as related. Its score bumps. Next context rebuild: swimming is back in your active memory.
+
+---
+
+## Dream Mode — Sleep Consolidation for AI
+
+```bash
+uv run memory dream
+```
+
+Like the brain during deep sleep, dream mode reorganizes memories without new input. An LLM coordinator analyzes memory state and plans which steps to run:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Dream Pipeline                        │
+│                                                          │
+│  ○ 1. Load          Load graph + entity files            │
+│  ○ 2. Extract docs  RAG documents → structured entities  │
+│  ○ 3. Consolidate   Merge redundant facts (8+ per entity)│
+│  ○ 4. Merge         Detect & merge duplicate entities    │
+│  ○ 5. Relations     FAISS similarity → LLM validation    │
+│  ○ 6. Prune         Archive dead entities → _archive/    │
+│  ○ 7. Summaries     Generate entity summaries via LLM    │
+│  ○ 8. Rescore       Recalculate all ACT-R scores         │
+│  ○ 9. Rebuild       Rebuild context + FAISS index        │
+│                                                          │
+│  Dashboard: Rich Live terminal UI (real-time progress)   │
+│  Coordinator: LLM plans steps + validates results        │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Brain-like behaviors:**
+- **Consolidation** — merging fragmented memories into coherent knowledge (like slow-wave sleep)
+- **Pruning** — removing weak, isolated memories (like synaptic pruning during REM)
+- **Relation discovery** — finding connections between unrelated memories (like dream associations)
+- **Re-scoring** — updating salience based on the new state (like memory reconsolidation)
+
+---
+
+## Knowledge Graph
+
+Every entity and relation is stored in a rich knowledge graph with metadata:
+
+```
+         ┌──────────┐     affects      ┌──────────────┐
+         │  Sciatica ├────────────────►│Daily Routine  │
+         │  health   │                 │  interest     │
+         │  s: 0.82  │                 │  s: 0.65      │
+         └─────┬─────┘                 └───────────────┘
+               │ improves
+               ▼
+         ┌──────────┐     uses         ┌──────────────┐
+         │ Swimming  ├────────────────►│ Local Pool    │
+         │ interest  │                 │  place        │
+         │ s: 0.71   │                 │  s: 0.45      │
+         └──────────┘                  └───────────────┘
+```
+
+**Entities** carry: `mention_dates` (last 50), `monthly_buckets` (older), `importance` (0-1), `retention` policy, `summary`, `aliases`, `tags`
+
+**Relations** carry: `strength` (0-1, Hebbian), `last_reinforced`, `mention_count`, `context`
+
+Visualize your graph interactively:
+```bash
+uv run memory graph    # Opens HTML visualization in browser
+```
+
+---
+
+## Import & Ingest
+
+### Chat Exports (Claude, ChatGPT)
+
+Drop your JSON export into `_inbox/` and memory-ai splits it automatically:
+
+```bash
+cp claude_conversations.json memory/_inbox/
+uv run memory inbox
+# → "JSON import: 342 conversation(s) from claude_conversations.json"
+uv run memory run      # Extract entities from all conversations
+```
+
+Supports **Claude.ai exports**, **ChatGPT exports**, and generic `[{role, content}]` arrays.
+
+### Documents
+
+Any `.md` or `.txt` file dropped in `_inbox/` gets automatically routed:
+- **Conversations** → saved as chats for the extraction pipeline
+- **Documents** → chunked and indexed in FAISS (RAG-searchable)
+- **Dream mode** later promotes document knowledge to structured entities
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install dependencies
+# 1. Install
+git clone https://github.com/stanyslassz/MyMemory.git
+cd MyMemory
 uv sync --extra dev
 
-# Check everything works
-uv run memory --help
-uv run pytest tests/ -v
+# 2. Configure
+cp config.yaml.example config.yaml
+cp .env.example .env
+# Edit config.yaml: set your LLM model
+# Edit .env: add API keys
 
-# View memory stats
-uv run memory stats
-
-# Process pending chats
-uv run memory run
-
-# Start MCP server (stdio)
-uv run memory serve
+# 3. Run
+uv run memory stats        # Check setup
+uv run memory run           # Process pending chats
+uv run memory dream         # Consolidate memories
+uv run memory serve         # Start MCP server
 ```
 
-## CLI Commands
+### LLM Providers
+
+Works with any LLM. Mix and match per pipeline step:
+
+```yaml
+llm:
+  extraction:
+    model: openrouter/google/gemini-3.1-flash-lite-preview
+  arbitration:
+    model: ollama/llama3.1:8b        # Local, free
+  context:
+    model: openai/gpt-4o-mini        # Fast, cheap
+  dream:
+    model: ollama/qwen3:14b          # Bigger model for overnight
+```
+
+| Provider | Prefix | Notes |
+|----------|--------|-------|
+| Ollama | `ollama/` | Local, free, private |
+| OpenRouter | `openrouter/` | 200+ models, pay-per-token |
+| OpenAI | `openai/` | GPT-4o, GPT-4o-mini |
+| Anthropic | `anthropic/` | Claude models |
+| LM Studio | `openai/` + `api_base` | Local GUI server |
+
+---
+
+## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `memory run` | Process pending chats through the full pipeline |
-| `memory replay <file>` | Re-process a specific chat file |
-| `memory rebuild-graph` | Rebuild `_graph.json` from Markdown files |
-| `memory rebuild-faiss` | Full FAISS index rebuild |
-| `memory rebuild-all` | Rebuild graph + context + FAISS |
-| `memory validate` | Check graph consistency |
+| `memory run` | Full pipeline: extract + resolve + enrich + context + FAISS |
+| `memory run-light` | Same but skip auto-consolidation (no extra LLM calls) |
+| `memory context` | Rebuild `_context.md` on demand (no extraction) |
+| `memory dream` | Brain-like memory reorganization (9-step pipeline) |
+| `memory inbox` | Process files in `_inbox/` (JSON exports, docs) |
+| `memory replay` | Retry failed extractions (`--list` to preview) |
+| `memory consolidate` | Detect duplicate entities (`--facts` for fact merging) |
+| `memory graph` | Interactive graph visualization in browser |
 | `memory stats` | Display memory metrics |
-| `memory inbox` | Process files in `_inbox/` |
-| `memory serve` | Start the MCP server |
-| `memory clean` | Flush memory data (with backup + dry-run) |
-| `memory consolidate` | Detect and merge duplicate entities |
-| `memory retry-ledger` | Show/retry failed pipeline jobs |
+| `memory rebuild-all` | Rebuild graph + scores + context + FAISS |
+| `memory validate` | Check graph consistency |
+| `memory clean` | Remove generated artifacts (with backup) |
+| `memory serve` | Start MCP server (stdio or SSE) |
 
-## MCP Tools
+---
 
-Exposed via [Model Context Protocol](https://modelcontextprotocol.io/) for any MCP-compatible client:
+## MCP Integration
 
-| Tool | Description |
-|------|-------------|
-| `get_context()` | Returns pre-compiled memory context (`_context.md`) |
-| `save_chat(messages)` | Saves a conversation for background processing |
-| `search_rag(query)` | Semantic search with re-ranking and L2->L1 promotion |
-
-## Claude Desktop / Claude Code Integration
-
-Add to your MCP settings (`claude_desktop_config.json` or `.claude/settings.json`):
+Plug memory-ai into any MCP-compatible client (Claude Desktop, Claude Code, etc.):
 
 ```json
 {
   "mcpServers": {
     "memory-ai": {
       "command": "uv",
-      "args": ["--directory", "/path/to/memory-ai", "run", "memory", "serve"]
+      "args": ["--directory", "/path/to/MyMemory", "run", "memory", "serve"]
     }
   }
 }
 ```
 
----
-
-## Configuration
-
-All configuration lives in `config.yaml` at the project root.
-
-### LLM Providers
-
-Different pipeline steps can use different models:
-
-```yaml
-llm:
-  extraction:
-    model: "ollama/llama3.1:8b"     # Local via Ollama
-    # model: "openai/gpt-4o-mini"   # OpenAI (needs OPENAI_API_KEY in .env)
-  arbitration:
-    model: "ollama/llama3.1:8b"
-  context:
-    model: "ollama/llama3.1:8b"
-  consolidation:
-    model: "ollama/llama3.1:8b"
-```
-
-### Scoring (ACT-R)
-
-```yaml
-scoring:
-  model: "act_r"
-  decay_factor: 0.5              # Standard ACT-R decay
-  decay_factor_short_term: 0.8   # Faster decay for short-term memories
-  importance_weight: 0.3         # Weight of LLM-assessed importance
-  spreading_weight: 0.2          # Weight of spreading activation
-  permanent_min_score: 0.5       # Floor for permanent entities
-  relation_strength_base: 0.5    # Initial relation strength
-  relation_decay_halflife: 180   # Days for unreinforced relations to halve
-  window_size: 50                # Recent mention dates to keep
-```
-
-### NLP Pre-filter (optional)
-
-```yaml
-nlp:
-  enabled: true
-  model: "fr_core_news_sm"       # ~15 MB, install with: python -m spacy download fr_core_news_sm
-  dedup_threshold: 0.85          # Similarity threshold for observation dedup
-  date_extraction: true          # Extract dates from French text
-  pre_ner: true                  # Detect proper nouns as resolver hints
-```
-
-### Embeddings
-
-```yaml
-embeddings:
-  provider: "sentence-transformers"  # Local, no API needed
-  model: "all-MiniLM-L6-v2"
-```
-
-### API Keys
-
-```bash
-cp .env.example .env
-# Add your keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
-```
+| Tool | What it does |
+|------|-------------|
+| `get_context()` | Returns the living context file — your AI's "working memory" |
+| `save_chat(messages)` | Saves a conversation for background processing |
+| `search_rag(query)` | Semantic search + ACT-R re-ranking + L2→L1 memory promotion |
 
 ---
 
-## Project Structure
+## The Context File
+
+What your AI actually sees — a token-budgeted, deterministic snapshot of your most important memories:
+
+```markdown
+# Memory Context — 2026-03-09
+
+## AI Personality
+Tu es un assistant personnel qui connait bien l'utilisateur...
+
+## Identity
+- Alexis, developer, lives in Lyon with partner and dog Max
+
+## Top of Mind
+- Kitchen renovation: contractor selected, starting April
+- Job interview at TechCorp next Tuesday
+- Back pain improving with swimming (3x/week)
+
+## Vigilances
+- [diagnosis] Chronic sciatica — avoid prolonged sitting
+- [treatment] Daily stretching routine — check compliance
+
+## Available in memory (not detailed above)
+python (0.42) | react (0.38) | alice (0.35) | ...
+```
+
+Each section has a token budget. Only what fits gets in. Everything else stays in L2/L3, searchable via RAG.
+
+---
+
+## Architecture
 
 ```
 src/
   core/
-    config.py          # Dataclass config from config.yaml + .env
-    models.py          # Pydantic v2 models (entities, relations, observations)
-    llm.py             # LiteLLM + Instructor, stall-aware streaming
+    config.py           # Config from YAML + .env
+    models.py           # Pydantic v2 models (20+ types)
+    llm.py              # LiteLLM + Instructor, stall-aware streaming, JSON repair
+    utils.py            # slugify, token estimation, frontmatter parsing
   memory/
-    store.py           # Markdown CRUD with YAML frontmatter
-    graph.py           # _graph.json management, relation reinforcement
-    scoring.py         # ACT-R base activation + spreading activation
-    mentions.py        # Windowed mention_dates + monthly bucket consolidation
-    context.py         # Deterministic context template builder
+    store.py            # Markdown CRUD with YAML frontmatter
+    graph.py            # Knowledge graph (atomic writes, lockfile, backup)
+    scoring.py          # ACT-R + spreading activation (two-pass)
+    mentions.py         # Windowed mention_dates + monthly buckets
+    context.py          # Deterministic context builder (zero LLM)
   pipeline/
-    extractor.py       # LLM extraction -> RawExtraction
-    resolver.py        # Deterministic slug/alias/FAISS matching
-    arbitrator.py      # LLM resolution for ambiguous entities only
-    enricher.py        # Write Markdown + update graph
-    indexer.py         # FAISS vector index (incremental)
-    nlp_prefilter.py   # Optional spaCy pre-filter
+    extractor.py        # LLM extraction with stall detection
+    resolver.py         # Deterministic entity resolution (zero LLM)
+    arbitrator.py       # LLM arbitration (ambiguous only)
+    enricher.py         # Write entities + update graph + score
+    indexer.py          # FAISS vector index (incremental)
+    dream.py            # 9-step dream pipeline with coordinator
+    dream_dashboard.py  # Rich Live terminal dashboard
+    chat_splitter.py    # Claude/ChatGPT JSON export splitter
+    doc_ingest.py       # Document → FAISS (fallback path)
+    orchestrator.py     # Pipeline orchestration (extracted from CLI)
+    visualize.py        # Interactive graph HTML visualization
   mcp/
-    server.py          # FastMCP server (get_context, save_chat, search_rag)
-  cli.py               # Click CLI entrypoint
+    server.py           # FastMCP server (3 tools)
 
-memory/                # Source of truth (gitignored)
-  self/                # Personal entities
-  close_ones/          # People, pets
-  work/                # Work-related entities
-  projects/            # Project entities
-  interests/           # Interests, hobbies
-  chats/               # Raw conversations
-  _inbox/              # Pending files for processing
-
-prompts/               # LLM prompt templates (.md files, never hardcoded)
+prompts/                # All LLM prompts as .md files (never hardcoded)
+memory/                 # Source of truth — Markdown files (gitignored)
 ```
 
 ---
 
-## Data Model
+## Tech Stack
 
-### Entity Types
-`person` | `health` | `work` | `project` | `interest` | `place` | `animal` | `organization`
-
-### Observation Categories
-`fact` | `preference` | `diagnosis` | `treatment` | `progression` | `technique` | `vigilance` | `decision` | `emotion` | `interpersonal` | `skill` | `project` | `context` | `rule`
-
-### Relation Types
-`affects` | `improves` | `worsens` | `requires` | `linked_to` | `lives_with` | `works_at` | `parent_of` | `friend_of` | `uses` | `part_of` | `contrasts_with` | `precedes`
-
-### Retention Policies
-
-| Policy | Behavior |
-|--------|----------|
-| `permanent` | Always in context, minimum score = 0.5 |
-| `long_term` | Normal ACT-R decay (d = 0.5) |
-| `short_term` | Accelerated decay (d = 0.8), fades faster |
-
----
-
-## Development
-
-```bash
-# Install with dev dependencies
-uv sync --extra dev
-
-# Run all tests
-uv run pytest tests/ -v
-
-# Run specific test
-uv run pytest tests/test_scoring.py::test_actr_burst_beats_spread -v
-
-# Check memory stats
-uv run memory stats
-```
-
-### Tech Stack
-- **Python 3.11+** managed with `uv` and built with `hatchling`
-- **Pydantic v2** for data models
-- **LiteLLM + Instructor** for LLM calls (supports Ollama, OpenAI, Anthropic, LM Studio)
-- **FAISS** for vector search (IndexFlatIP)
-- **sentence-transformers** for local embeddings
-- **FastMCP** for Model Context Protocol server
-- **Click** for CLI
-- **spaCy** (optional) for NLP pre-filtering
+| Layer | Technology |
+|-------|-----------|
+| Language | Python 3.11+ (`uv` + `hatchling`) |
+| Models | Pydantic v2 |
+| LLM | LiteLLM + Instructor (any provider) |
+| Vectors | FAISS (IndexFlatIP, cosine similarity) |
+| Embeddings | sentence-transformers or API-based |
+| MCP | FastMCP |
+| CLI | Click + Rich |
+| NLP | spaCy (optional) |
+| Resilience | json-repair (small model JSON fixing) |
 
 ---
 
 ## Philosophy
 
-This is not a product. It's a personal brain for your AI assistant.
+> *"The art of memory is the art of attention."* — Samuel Johnson
 
-Every conversation you have is a memory. Most memory systems just dump everything into a vector database and call it a day. memory-ai takes a different approach: it models memory the way cognitive science says human brains work.
+This isn't a RAG database. It's a cognitive system.
 
-- **Adaptive scoring** — ACT-R power-law decay means frequently and recently used memories surface naturally, while unused ones fade
-- **Associative recall** — Spreading activation through the knowledge graph means related concepts strengthen each other
-- **Natural forgetting** — Not a bug, it's a feature. Your context window is limited, so only what matters gets in
-- **Re-emergence** — A forgotten memory can come back when retrieved via RAG search, just like a human suddenly remembering something
-- **Deterministic output** — The context file is built from a template, not generated by an LLM. Reproducible, fast, token-efficient
-
-The goal is a context file that makes your AI feel like it truly knows you — your health, your projects, your preferences, your relationships — without overwhelming it with irrelevant details.
+- **Adaptive** — ACT-R power-law decay means memories surface when they matter
+- **Associative** — Spreading activation through the graph, like neural priming
+- **Forgetful by design** — Your context window is limited. Only what matters gets in
+- **Resilient** — Dormant memories re-emerge when recalled, just like human memory
+- **Transparent** — Everything is Markdown files you can read and edit
+- **Local-first** — Your memories stay on your machine
 
 ---
 
-## License
+<div align="center">
 
-MIT
+**Open source. Local first. Not a product — a brain.**
+
+MIT License
+
+</div>
