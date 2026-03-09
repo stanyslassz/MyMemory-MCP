@@ -469,5 +469,18 @@ def dream(ctx, dry_run, step):
     console.print("\n[bold green]Dream complete.[/bold green]")
 
 
+@cli.command()
+@click.pass_context
+def graph(ctx):
+    """Open interactive graph visualization in browser."""
+    config = ctx.obj["config"]
+    from src.memory.graph import load_graph
+    from src.pipeline.visualize import open_graph
+
+    g = load_graph(config.memory_path)
+    output = open_graph(g, config.memory_path)
+    console.print(f"[green]Graph opened: {output}[/green]")
+
+
 if __name__ == "__main__":
     cli()
