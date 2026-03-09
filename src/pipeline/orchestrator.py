@@ -83,6 +83,72 @@ def fallback_to_doc_ingest(
 
 
 # ------------------------------------------------------------------
+# Batch relation discovery (deterministic, no LLM)
+# ------------------------------------------------------------------
+
+def discover_batch_relations(
+    touched_ids: list[str],
+    graph,
+    config,
+    memory_path,
+    console,
+) -> int:
+    """Discover deterministic relations for entities touched in this batch.
+
+    Uses FAISS similarity + tag overlap heuristics. No LLM calls.
+    """
+    if not touched_ids:
+        return 0
+
+    from src.pipeline.indexer import search as faiss_search
+    from src.memory.graph import add_relation, save_graph
+    from src.core.models import GraphRelation
+
+    # Build existing relation lookup
+    existing = set()
+    for rel in graph.relations:
+        existing.add((rel.from_entity, rel.to_entity))
+        existing.add((rel.to_entity, rel.from_entity))
+
+    # Deduplicate touched_ids
+    touched_ids = list(dict.fromkeys(touched_ids))
+
+    discovered = 0
+    for eid in touched_ids:
+        entity = graph.entities.get(eid)
+        if not entity:
+            continue
+        try:
+            results = faiss_search(entity.title, config, memory_path, top_k=3)
+        except Exception:
+            continue
+        for result in results:
+            other_id = result.entity_id
+            if other_id == eid or other_id not in graph.entities:
+                continue
+            if (eid, other_id) in existing:
+                continue
+            other = graph.entities[other_id]
+            # Tag overlap: 2+ shared tags + high FAISS score
+            shared_tags = set(entity.tags or []) & set(other.tags or [])
+            if len(shared_tags) >= 2 and result.score >= 0.8:
+                new_rel = GraphRelation(
+                    from_entity=eid, to_entity=other_id,
+                    type="linked_to",
+                    context=f"tag overlap: {', '.join(sorted(shared_tags))}",
+                )
+                add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
+                existing.add((eid, other_id))
+                existing.add((other_id, eid))
+                discovered += 1
+
+    if discovered:
+        save_graph(memory_path, graph)
+        console.print(f"  [green]Discovered {discovered} new relation(s) from batch[/green]")
+    return discovered
+
+
+# ------------------------------------------------------------------
 # Auto-consolidation
 # ------------------------------------------------------------------
 
@@ -201,6 +267,8 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
     chats = chats[:max_chats]
     console.print(f"[bold]Processing {len(chats)} pending chat(s)...[/bold]")
 
+    all_touched_ids: list[str] = []
+
     for chat_path in chats:
         console.print(f"\n[cyan]→ {chat_path.name}[/cyan]")
 
@@ -269,6 +337,8 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
         try:
             report = enrich_memory(resolved, config)
             console.print(f"  Updated: {report.entities_updated}, Created: {report.entities_created}")
+            all_touched_ids.extend(report.entities_updated)
+            all_touched_ids.extend(report.entities_created)
             if report.errors:
                 for err in report.errors:
                     console.print(f"  [yellow]Warning: {err}[/yellow]")
@@ -278,6 +348,13 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
 
         # Mark processed
         mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
+
+    # Step 5a: Discover batch relations (deterministic, no LLM)
+    try:
+        graph = load_graph(memory_path)
+        n_discovered = discover_batch_relations(all_touched_ids, graph, config, memory_path, console)
+    except Exception as e:
+        console.print(f"  [yellow]Batch relation discovery warning: {e}[/yellow]")
 
     # Step 5b: Auto-consolidate entities with too many facts (skipped in run-light)
     if consolidate:

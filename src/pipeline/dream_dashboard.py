@@ -15,10 +15,11 @@ DREAM_STEPS = {
     3: {"name": "Consolidate"},
     4: {"name": "Merge"},
     5: {"name": "Relations"},
-    6: {"name": "Prune"},
-    7: {"name": "Summaries"},
-    8: {"name": "Rescore"},
-    9: {"name": "Rebuild"},
+    6: {"name": "Transitive"},
+    7: {"name": "Prune"},
+    8: {"name": "Summaries"},
+    9: {"name": "Rescore"},
+    10: {"name": "Rebuild"},
 }
 
 _STATUS_STYLE = {

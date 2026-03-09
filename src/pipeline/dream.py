@@ -1,7 +1,8 @@
 """Dream mode: brain-like memory reorganization during idle time.
 
-9-step pipeline: load → extract docs → consolidate facts → merge entities
-→ discover relations → prune dead → generate summaries → rescore → rebuild.
+10-step pipeline: load → extract docs → consolidate facts → merge entities
+→ discover relations → transitive relations → prune dead → generate summaries
+→ rescore → rebuild.
 
 No new information enters — only reorganization of existing knowledge.
 LLM coordinator plans which steps to run and validates critical results.
@@ -34,6 +35,7 @@ class DreamReport:
         self.facts_consolidated: int = 0
         self.entities_merged: int = 0
         self.relations_discovered: int = 0
+        self.transitive_relations: int = 0
         self.entities_pruned: int = 0
         self.summaries_generated: int = 0
         self.errors: list[str] = []
@@ -73,14 +75,14 @@ def run_dream(
             console.print(f"[dim]Coordinator plan: {plan.reasoning}[/dim]")
         except Exception as e:
             logger.warning("Dream coordinator failed, running all steps: %s", e)
-            steps_to_run = list(range(1, 10))
+            steps_to_run = list(range(1, 11))
 
     # Always include step 1 (load)
     if 1 not in steps_to_run:
         steps_to_run.insert(0, 1)
 
     with DreamDashboard(console) as dashboard:
-        for s in range(1, 10):
+        for s in range(1, 11):
             if s not in steps_to_run:
                 dashboard.skip_step(s)
                 continue
@@ -116,20 +118,24 @@ def run_dream(
                     dashboard.complete_step(s, summary)
 
                 elif s == 6:
+                    _step_transitive_relations(graph, memory_path, config, console, report, dry_run)
+                    dashboard.complete_step(s, f"{report.transitive_relations} inferred")
+
+                elif s == 7:
                     _step_prune_dead(graph, memory_path, config, console, report, dry_run)
                     dashboard.complete_step(s, f"{report.entities_pruned} pruned")
 
-                elif s == 7:
+                elif s == 8:
                     _step_generate_summaries(graph, entity_paths, config, console, report, dry_run)
                     dashboard.complete_step(s, f"{report.summaries_generated} generated")
 
-                elif s == 8:
+                elif s == 9:
                     if not dry_run:
                         from src.memory.scoring import recalculate_all_scores
                         graph = recalculate_all_scores(graph, config)
                     dashboard.complete_step(s, "scores updated")
 
-                elif s == 9:
+                elif s == 10:
                     if not dry_run:
                         _step_rebuild(graph, memory_path, config, console)
                     dashboard.complete_step(s, "context + FAISS rebuilt")
@@ -214,6 +220,33 @@ def _collect_dream_stats(
     for eid, entity in graph.entities.items():
         if not entity.summary:
             counts["summary_candidates"] += 1
+
+    # Cluster analysis via BFS connected components
+    adj: dict[str, set[str]] = defaultdict(set)
+    for rel in graph.relations:
+        adj[rel.from_entity].add(rel.to_entity)
+        adj[rel.to_entity].add(rel.from_entity)
+
+    visited: set[str] = set()
+    clusters: list[set[str]] = []
+    for eid in graph.entities:
+        if eid in visited:
+            continue
+        cluster: set[str] = set()
+        queue = [eid]
+        while queue:
+            node = queue.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            cluster.add(node)
+            for neighbor in adj.get(node, []):
+                if neighbor not in visited and neighbor in graph.entities:
+                    queue.append(neighbor)
+        clusters.append(cluster)
+
+    counts["clusters"] = len(clusters)
+    counts["largest_cluster"] = max(len(c) for c in clusters) if clusters else 0
 
     stats = "\n".join(f"- {k.replace('_', ' ').title()}: {v}" for k, v in counts.items())
     return stats, counts
@@ -618,6 +651,102 @@ def _build_dossier(eid: str, entity, memory_path: Path) -> str:
     return "\n".join(lines)
 
 
+# Transitive inference rules: (rel_type_A, rel_type_B) -> inferred_type
+_TRANSITIVE_RULES: dict[tuple[str, str], str] = {
+    ("affects", "affects"): "affects",
+    ("part_of", "part_of"): "part_of",
+    ("requires", "requires"): "requires",
+    ("improves", "affects"): "improves",
+    ("worsens", "affects"): "worsens",
+    ("uses", "part_of"): "uses",
+}
+
+
+def _step_transitive_relations(
+    graph: GraphData,
+    memory_path: Path,
+    config: Config,
+    console: Console,
+    report: DreamReport,
+    dry_run: bool,
+    min_strength: float = 0.4,
+    max_new: int = 20,
+) -> None:
+    """Step 6: Infer transitive relations (deterministic, no LLM).
+
+    For each triple (A→rel1→B, B→rel2→C) where A and C have no direct relation,
+    apply transitive rules to create inferred relations with reduced strength.
+    """
+    from src.memory.graph import add_relation, save_graph
+
+    # Build adjacency: entity -> list of (target, relation)
+    adjacency: dict[str, list[tuple[str, GraphRelation]]] = defaultdict(list)
+    for rel in graph.relations:
+        if rel.strength >= min_strength:
+            adjacency[rel.from_entity].append((rel.to_entity, rel))
+
+    # Build existing relation set
+    existing: set[tuple[str, str]] = set()
+    for rel in graph.relations:
+        existing.add((rel.from_entity, rel.to_entity))
+        existing.add((rel.to_entity, rel.from_entity))
+
+    discovered = 0
+    for entity_a, neighbors_a in adjacency.items():
+        if discovered >= max_new:
+            break
+        for entity_b, rel_ab in neighbors_a:
+            if discovered >= max_new:
+                break
+            for entity_c, rel_bc in adjacency.get(entity_b, []):
+                if discovered >= max_new:
+                    break
+                if entity_c == entity_a:
+                    continue
+                if (entity_a, entity_c) in existing:
+                    continue
+                # Check transitive rule
+                rule_key = (rel_ab.type, rel_bc.type)
+                inferred_type = _TRANSITIVE_RULES.get(rule_key)
+                if not inferred_type:
+                    continue
+                # Inferred strength = min of both * 0.5
+                inferred_strength = min(rel_ab.strength, rel_bc.strength) * 0.5
+
+                title_a = graph.entities.get(entity_a)
+                title_b = graph.entities.get(entity_b)
+                title_c = graph.entities.get(entity_c)
+                if not title_a or not title_c:
+                    continue
+                context = f"transitive: {title_a.title} →{rel_ab.type}→ {title_b.title if title_b else entity_b} →{rel_bc.type}→ {title_c.title}"
+
+                if dry_run:
+                    console.print(f"  [dim]Would infer: {title_a.title} →{inferred_type}→ {title_c.title}[/dim]")
+                    discovered += 1
+                    existing.add((entity_a, entity_c))
+                    existing.add((entity_c, entity_a))
+                    continue
+
+                new_rel = GraphRelation(
+                    from_entity=entity_a, to_entity=entity_c,
+                    type=inferred_type,
+                    strength=inferred_strength,
+                    context=context,
+                )
+                add_relation(graph, new_rel, strength_growth=0.0)
+                existing.add((entity_a, entity_c))
+                existing.add((entity_c, entity_a))
+                discovered += 1
+                console.print(f"    [green]{title_a.title} →{inferred_type}→ {title_c.title} (transitive)[/green]")
+
+    report.transitive_relations = discovered
+    if discovered and not dry_run:
+        save_graph(memory_path, graph)
+        console.print(f"  [green]Inferred {discovered} transitive relation(s)[/green]")
+    elif not discovered:
+        console.print("  No transitive relations to infer")
+
+
 def _step_prune_dead(
     graph: GraphData,
     memory_path: Path,
@@ -629,7 +758,7 @@ def _step_prune_dead(
     max_frequency: int = 1,
     min_age_days: int = 90,
 ) -> None:
-    """Step 6: Archive low-score orphan entities."""
+    """Step 7: Archive low-score orphan entities."""
     today = date.today()
 
     # Build set of entities that have relations
@@ -699,7 +828,7 @@ def _step_generate_summaries(
     report: DreamReport,
     dry_run: bool,
 ) -> None:
-    """Step 7: Generate/refresh entity summaries via LLM."""
+    """Step 8: Generate/refresh entity summaries via LLM."""
     from src.core.llm import call_entity_summary
     from src.memory.store import read_entity, write_entity
 
@@ -757,7 +886,7 @@ def _step_rebuild(
     config: Config,
     console: Console,
 ) -> None:
-    """Step 9: Rebuild context and FAISS index."""
+    """Step 10: Rebuild context and FAISS index."""
     from src.memory.context import build_context, write_context, write_index
     from src.memory.graph import save_graph
     from src.pipeline.indexer import build_index

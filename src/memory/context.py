@@ -127,6 +127,56 @@ def _group_facts_by_category(facts: list[str]) -> dict[str, list[str]]:
     return grouped
 
 
+def _sort_by_cluster(
+    entities: list[tuple[str, GraphEntity]],
+    graph: GraphData,
+) -> list[tuple[str, GraphEntity]]:
+    """Sort entities so that members of the same connected component are adjacent.
+
+    Within each cluster, preserves the original order (score-descending).
+    """
+    if len(entities) <= 1:
+        return entities
+
+    entity_ids = {eid for eid, _ in entities}
+
+    # Build adjacency restricted to these entities
+    adj: dict[str, set[str]] = {eid: set() for eid in entity_ids}
+    for rel in graph.relations:
+        if rel.from_entity in entity_ids and rel.to_entity in entity_ids:
+            adj[rel.from_entity].add(rel.to_entity)
+            adj[rel.to_entity].add(rel.from_entity)
+
+    # BFS connected components
+    visited: set[str] = set()
+    cluster_map: dict[str, int] = {}
+    cluster_id = 0
+    for eid in [e for e, _ in entities]:  # iterate in score order
+        if eid in visited:
+            continue
+        queue = [eid]
+        while queue:
+            node = queue.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            cluster_map[node] = cluster_id
+            for neighbor in adj.get(node, []):
+                if neighbor not in visited:
+                    queue.append(neighbor)
+        cluster_id += 1
+
+    # Sort: primary by first-appearance order of cluster, secondary by original order
+    cluster_first_idx: dict[int, int] = {}
+    for i, (eid, _) in enumerate(entities):
+        cid = cluster_map.get(eid, 0)
+        if cid not in cluster_first_idx:
+            cluster_first_idx[cid] = i
+
+    original_pos = {eid: i for i, (eid, _) in enumerate(entities)}
+    return sorted(entities, key=lambda x: (cluster_first_idx.get(cluster_map.get(x[0], 0), 0), original_pos.get(x[0], 0)))
+
+
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: words * 1.3. Delegates to shared util."""
     return _estimate_tokens_util(text)
@@ -278,11 +328,14 @@ def build_context(
     for eid, _ in personal_entities:
         shown_ids.add(eid)
 
-    # Top of mind (everything remaining scored high)
+    # Top of mind (everything remaining scored high, grouped by cluster affinity)
     top_entities = [(eid, e) for eid, e in all_top if eid not in shown_ids]
     top_entities.sort(key=lambda x: x[1].score, reverse=True)
-    top_text = _collect_section(top_entities[:10], graph, memory_path, section_budget("top_of_mind"))
-    for eid, _ in top_entities[:10]:
+    top_entities = top_entities[:10]
+    # Group by connected component so related entities appear together
+    top_entities = _sort_by_cluster(top_entities, graph)
+    top_text = _collect_section(top_entities, graph, memory_path, section_budget("top_of_mind"))
+    for eid, _ in top_entities:
         shown_ids.add(eid)
 
     # Vigilances (compact quick-reference: entity + key content, max 2 per entity)
@@ -493,8 +546,10 @@ def build_context_with_llm(
     # Top of mind (everything remaining)
     top_entities = [(eid, e) for eid, e in all_top if eid not in shown_ids]
     top_entities.sort(key=lambda x: x[1].score, reverse=True)
-    top_text = _llm_section("Top of Mind (current priorities)", top_entities[:10], "top_of_mind")
-    for eid, _ in top_entities[:10]:
+    top_entities = top_entities[:10]
+    top_entities = _sort_by_cluster(top_entities, graph)
+    top_text = _llm_section("Top of Mind (current priorities)", top_entities, "top_of_mind")
+    for eid, _ in top_entities:
         shown_ids.add(eid)
 
     # Vigilances — deterministic (no LLM needed for safety-critical data)

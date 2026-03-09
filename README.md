@@ -188,10 +188,11 @@ Like the brain during deep sleep, dream mode reorganizes memories without new in
 │  ○ 3. Consolidate   Merge redundant facts (8+ per entity)│
 │  ○ 4. Merge         Detect & merge duplicate entities    │
 │  ○ 5. Relations     FAISS similarity → LLM validation    │
-│  ○ 6. Prune         Archive dead entities → _archive/    │
-│  ○ 7. Summaries     Generate entity summaries via LLM    │
-│  ○ 8. Rescore       Recalculate all ACT-R scores         │
-│  ○ 9. Rebuild       Rebuild context + FAISS index        │
+│  ○ 6. Transitive    Infer transitive relations           │
+│  ○ 7. Prune         Archive dead entities → _archive/    │
+│  ○ 8. Summaries     Generate entity summaries via LLM    │
+│  ○ 9. Rescore       Recalculate all ACT-R scores         │
+│  ○ 10. Rebuild      Rebuild context + FAISS index        │
 │                                                          │
 │  Dashboard: Rich Live terminal UI (real-time progress)   │
 │  Coordinator: LLM plans steps + validates results        │
@@ -314,7 +315,7 @@ llm:
 | `memory run` | Full pipeline: extract + resolve + enrich + context + FAISS |
 | `memory run-light` | Same but skip auto-consolidation (no extra LLM calls) |
 | `memory context` | Rebuild `_context.md` on demand (no extraction) |
-| `memory dream` | Brain-like memory reorganization (9-step pipeline) |
+| `memory dream` | Brain-like memory reorganization (10-step pipeline) |
 | `memory inbox` | Process files in `_inbox/` (JSON exports, docs) |
 | `memory replay` | Retry failed extractions (`--list` to preview) |
 | `memory consolidate` | Detect duplicate entities (`--facts` for fact merging) |
@@ -401,7 +402,7 @@ src/
     arbitrator.py       # LLM arbitration (ambiguous only)
     enricher.py         # Write entities + update graph + score
     indexer.py          # FAISS vector index (incremental)
-    dream.py            # 9-step dream pipeline with coordinator
+    dream.py            # 10-step dream pipeline with coordinator
     dream_dashboard.py  # Rich Live terminal dashboard
     chat_splitter.py    # Claude/ChatGPT JSON export splitter
     doc_ingest.py       # Document → FAISS (fallback path)

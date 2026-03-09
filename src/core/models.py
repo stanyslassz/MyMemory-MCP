@@ -222,7 +222,7 @@ class FactConsolidation(BaseModel):
 # ── Dream mode planning ─────────────────────────────────────
 
 class DreamPlan(BaseModel):
-    steps: list[int] = Field(description="Ordered list of step numbers to execute (1-9)")
+    steps: list[int] = Field(description="Ordered list of step numbers to execute (1-10)")
     reasoning: str = Field(description="Brief explanation of why these steps were chosen")
 
 

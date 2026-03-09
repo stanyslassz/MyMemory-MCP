@@ -437,14 +437,14 @@ def consolidate(ctx, dry_run, facts, min_facts):
 
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Show what would change without modifying")
-@click.option("--step", type=int, default=None, help="Run only step N (1-9)")
+@click.option("--step", type=int, default=None, help="Run only step N (1-10)")
 @click.pass_context
 def dream(ctx, dry_run, step):
     """Brain-like memory reorganization: consolidate, prune, discover, rebuild.
 
-    9 steps: load → extract docs → consolidate facts → merge entities
-    → discover relations → prune dead → generate summaries → rescore → rebuild.
-    LLM coordinator plans which steps to run.
+    10 steps: load → extract docs → consolidate facts → merge entities
+    → discover relations → transitive relations → prune dead → generate summaries
+    → rescore → rebuild. LLM coordinator plans which steps to run.
     """
     from src.pipeline.dream import run_dream
 
@@ -461,6 +461,7 @@ def dream(ctx, dry_run, step):
     console.print(f"  Facts consolidated: {report.facts_consolidated}")
     console.print(f"  Entities merged: {report.entities_merged}")
     console.print(f"  Relations discovered: {report.relations_discovered}")
+    console.print(f"  Transitive relations: {report.transitive_relations}")
     console.print(f"  Entities pruned: {report.entities_pruned}")
     console.print(f"  Summaries generated: {report.summaries_generated}")
     if report.errors:

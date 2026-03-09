@@ -54,6 +54,7 @@ def test_dashboard_render():
 
 
 def test_dream_steps_list():
-    """All 9 steps should be defined (including new doc extract step)."""
-    assert len(DREAM_STEPS) == 9
+    """All 10 steps should be defined (including transitive relations step)."""
+    assert len(DREAM_STEPS) == 10
     assert DREAM_STEPS[1]["name"] == "Load"
+    assert DREAM_STEPS[6]["name"] == "Transitive"
