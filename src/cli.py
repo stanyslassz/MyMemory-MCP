@@ -56,7 +56,7 @@ def _run_pipeline(config, *, consolidate: bool = True) -> None:
         mark_chat_fallback, increment_extraction_retries,
     )
     from src.memory.graph import load_graph
-    from src.pipeline.extractor import extract_from_chat
+    from src.pipeline.extractor import extract_from_chat, sanitize_extraction
     from src.pipeline.resolver import resolve_all
     from src.pipeline.arbitrator import arbitrate_entity
     from src.pipeline.enricher import enrich_memory
@@ -88,6 +88,7 @@ def _run_pipeline(config, *, consolidate: bool = True) -> None:
 
         try:
             extraction = extract_from_chat(content, config)
+            extraction = sanitize_extraction(extraction)
             console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")
         except Exception as e:
             is_timeout = _is_timeout_error(e)
@@ -484,7 +485,7 @@ def replay(ctx, list_only):
     console.print(f"[bold]Replaying {len(entries)} failed extraction(s)...[/bold]")
 
     from src.memory.store import get_chat_content
-    from src.pipeline.extractor import extract_from_chat
+    from src.pipeline.extractor import extract_from_chat, sanitize_extraction
     from src.pipeline.resolver import resolve_all
     from src.pipeline.enricher import enrich_memory
     from src.memory.graph import load_graph
@@ -503,6 +504,7 @@ def replay(ctx, list_only):
 
         try:
             extraction = extract_from_chat(content, config)
+            extraction = sanitize_extraction(extraction)
             console.print(f"  Extracted {len(extraction.entities)} entities")
 
             graph = load_graph(config.memory_path)
