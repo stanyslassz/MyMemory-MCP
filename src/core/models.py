@@ -217,3 +217,15 @@ class ConsolidatedFact(BaseModel):
 
 class FactConsolidation(BaseModel):
     consolidated: list[ConsolidatedFact]
+
+
+# ── Dream mode planning ─────────────────────────────────────
+
+class DreamPlan(BaseModel):
+    steps: list[int] = Field(description="Ordered list of step numbers to execute (1-9)")
+    reasoning: str = Field(description="Brief explanation of why these steps were chosen")
+
+
+class DreamValidation(BaseModel):
+    approved: bool = Field(description="Whether the results look correct")
+    issues: list[str] = Field(default_factory=list, description="List of issues found, if any")

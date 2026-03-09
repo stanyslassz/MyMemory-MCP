@@ -256,6 +256,28 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
     return results
 
 
+def list_unextracted_docs(manifest_path: str) -> list[dict]:
+    """List documents in FAISS manifest that haven't been entity-extracted."""
+    manifest = _load_manifest(manifest_path)
+    docs = []
+    for key, entry in manifest.get("indexed_files", {}).items():
+        if entry.get("source_type") != "document":
+            continue
+        if entry.get("entity_extracted", False):
+            continue
+        source_id = key.replace("_doc/", "", 1)
+        docs.append({"source_id": source_id, "key": key, **entry})
+    return docs
+
+
+def mark_doc_extracted(manifest_path: str, doc_key: str) -> None:
+    """Mark a document as entity-extracted in the manifest."""
+    manifest = _load_manifest(manifest_path)
+    if doc_key in manifest.get("indexed_files", {}):
+        manifest["indexed_files"][doc_key]["entity_extracted"] = True
+        _save_manifest(manifest_path, manifest)
+
+
 def _save_index(config: Config, index, chunk_mapping: list[dict], manifest: dict) -> None:
     """Save FAISS index, mapping, and manifest to disk."""
     import faiss

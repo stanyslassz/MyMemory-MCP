@@ -1,9 +1,10 @@
 """Dream mode: brain-like memory reorganization during idle time.
 
-8-step pipeline: load → consolidate facts → merge entities → discover relations
-→ prune dead → generate summaries → rescore → rebuild context + FAISS.
+9-step pipeline: load → extract docs → consolidate facts → merge entities
+→ discover relations → prune dead → generate summaries → rescore → rebuild.
 
 No new information enters — only reorganization of existing knowledge.
+LLM coordinator plans which steps to run and validates critical results.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ class DreamReport:
     """Collects stats from each dream step."""
 
     def __init__(self):
+        self.docs_extracted: int = 0
         self.facts_consolidated: int = 0
         self.entities_merged: int = 0
         self.relations_discovered: int = 0
@@ -46,67 +48,192 @@ def run_dream(
 ) -> DreamReport:
     """Run the full dream pipeline (or a single step).
 
-    Args:
-        config: Loaded configuration.
-        console: Rich console for output.
-        dry_run: If True, show what would change without modifying.
-        step: If set, run only this step number (1-8).
+    Uses LLM coordinator to plan steps when running full pipeline.
+    Dashboard shows real-time progress via Rich Live.
     """
+    from src.pipeline.dream_dashboard import DreamDashboard
+
     report = DreamReport()
     memory_path = config.memory_path
 
-    # Step 1: Load
-    if step is None or step == 1:
-        console.print("\n[bold]Step 1: Loading graph and entities...[/bold]")
-        graph, entity_paths = _step_load(memory_path)
-        console.print(f"  Loaded {len(graph.entities)} entities, {len(graph.relations)} relations")
+    # Always load graph first
+    graph, entity_paths = _step_load(memory_path)
+
+    # Determine which steps to run
+    if step is not None:
+        steps_to_run = [step]
     else:
-        graph, entity_paths = _step_load(memory_path)
+        # Try LLM coordinator for planning
+        stats_text, counts = _collect_dream_stats(graph, entity_paths, config)
+        try:
+            from src.core.llm import call_dream_plan
+            plan = call_dream_plan(stats_text, config)
+            steps_to_run = plan.steps
+            logger.info("Dream plan (LLM): steps=%s, reason=%s", plan.steps, plan.reasoning)
+            console.print(f"[dim]Coordinator plan: {plan.reasoning}[/dim]")
+        except Exception as e:
+            logger.warning("Dream coordinator failed, running all steps: %s", e)
+            steps_to_run = list(range(1, 10))
 
-    # Step 2: Fact consolidation
-    if step is None or step == 2:
-        console.print("\n[bold]Step 2: Consolidating facts...[/bold]")
-        _step_consolidate_facts(graph, entity_paths, config, console, report, dry_run)
+    # Always include step 1 (load)
+    if 1 not in steps_to_run:
+        steps_to_run.insert(0, 1)
 
-    # Step 3: Entity merging
-    if step is None or step == 3:
-        console.print("\n[bold]Step 3: Merging duplicate entities...[/bold]")
-        _step_merge_entities(graph, memory_path, config, console, report, dry_run)
+    with DreamDashboard(console) as dashboard:
+        for s in range(1, 10):
+            if s not in steps_to_run:
+                dashboard.skip_step(s)
+                continue
 
-    # Step 4: Relation discovery
-    if step is None or step == 4:
-        console.print("\n[bold]Step 4: Discovering new relations...[/bold]")
-        _step_discover_relations(graph, memory_path, config, console, report, dry_run)
+            dashboard.start_step(s)
+            try:
+                if s == 1:
+                    dashboard.complete_step(s, f"{len(graph.entities)} entities, {len(graph.relations)} relations")
 
-    # Step 5: Dead entity pruning
-    if step is None or step == 5:
-        console.print("\n[bold]Step 5: Pruning dead entities...[/bold]")
-        _step_prune_dead(graph, memory_path, config, console, report, dry_run)
+                elif s == 2:
+                    n = _step_extract_documents(graph, memory_path, config, console, report, dry_run)
+                    dashboard.complete_step(s, f"{n} docs extracted" if n else "no docs pending")
 
-    # Step 6: Summary generation
-    if step is None or step == 6:
-        console.print("\n[bold]Step 6: Generating summaries...[/bold]")
-        _step_generate_summaries(graph, entity_paths, config, console, report, dry_run)
+                elif s == 3:
+                    _step_consolidate_facts(graph, entity_paths, config, console, report, dry_run)
+                    summary = f"{report.facts_consolidated} consolidated"
+                    if report.facts_consolidated > 0 and not dry_run:
+                        summary = _validate_step(s, summary, config, report)
+                    dashboard.complete_step(s, summary)
 
-    # Step 7: Rescore
-    if step is None or step == 7:
-        console.print("\n[bold]Step 7: Rescoring all entities...[/bold]")
-        if not dry_run:
-            from src.memory.scoring import recalculate_all_scores
-            graph = recalculate_all_scores(graph, config)
-            console.print("  Scores recalculated")
-        else:
-            console.print("  [dim]Would recalculate all scores[/dim]")
+                elif s == 4:
+                    _step_merge_entities(graph, memory_path, config, console, report, dry_run)
+                    summary = f"{report.entities_merged} merged"
+                    if report.entities_merged > 0 and not dry_run:
+                        summary = _validate_step(s, summary, config, report)
+                    dashboard.complete_step(s, summary)
 
-    # Step 8: Rebuild context + FAISS
-    if step is None or step == 8:
-        console.print("\n[bold]Step 8: Rebuilding context and FAISS...[/bold]")
-        if not dry_run:
-            _step_rebuild(graph, memory_path, config, console)
-        else:
-            console.print("  [dim]Would rebuild _context.md and FAISS index[/dim]")
+                elif s == 5:
+                    _step_discover_relations(graph, memory_path, config, console, report, dry_run)
+                    summary = f"{report.relations_discovered} discovered"
+                    if report.relations_discovered > 0 and not dry_run:
+                        summary = _validate_step(s, summary, config, report)
+                    dashboard.complete_step(s, summary)
+
+                elif s == 6:
+                    _step_prune_dead(graph, memory_path, config, console, report, dry_run)
+                    dashboard.complete_step(s, f"{report.entities_pruned} pruned")
+
+                elif s == 7:
+                    _step_generate_summaries(graph, entity_paths, config, console, report, dry_run)
+                    dashboard.complete_step(s, f"{report.summaries_generated} generated")
+
+                elif s == 8:
+                    if not dry_run:
+                        from src.memory.scoring import recalculate_all_scores
+                        graph = recalculate_all_scores(graph, config)
+                    dashboard.complete_step(s, "scores updated")
+
+                elif s == 9:
+                    if not dry_run:
+                        _step_rebuild(graph, memory_path, config, console)
+                    dashboard.complete_step(s, "context + FAISS rebuilt")
+
+            except Exception as e:
+                dashboard.fail_step(s, str(e)[:50])
+                report.errors.append(f"Step {s} failed: {e}")
 
     return report
+
+
+# ── Coordinator helpers ──────────────────────────────────────
+
+
+def _collect_dream_stats(
+    graph: GraphData,
+    entity_paths: dict[str, Path],
+    config: Config,
+) -> tuple[str, dict[str, int]]:
+    """Collect memory stats for the LLM coordinator. Returns (formatted_stats, counts)."""
+    from src.pipeline.indexer import list_unextracted_docs
+    from src.memory.store import read_entity
+
+    today = date.today()
+    counts = {
+        "total_entities": len(graph.entities),
+        "total_relations": len(graph.relations),
+        "unextracted_docs": 0,
+        "consolidation_candidates": 0,
+        "merge_candidates": 0,
+        "prune_candidates": 0,
+        "summary_candidates": 0,
+    }
+
+    # Unextracted docs
+    try:
+        docs = list_unextracted_docs(config.faiss.manifest_path)
+        counts["unextracted_docs"] = len(docs)
+    except Exception:
+        pass
+
+    # Consolidation candidates (8+ facts)
+    for eid, path in entity_paths.items():
+        try:
+            _, sections = read_entity(path)
+            facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+            if len(facts) >= 8:
+                counts["consolidation_candidates"] += 1
+        except Exception:
+            pass
+
+    # Merge candidates (slug/alias overlap)
+    seen_pairs: set[tuple[str, str]] = set()
+    slugs = list(graph.entities.keys())
+    for i, slug_a in enumerate(slugs):
+        ea = graph.entities[slug_a]
+        aliases_a = {a.lower() for a in ea.aliases} | {ea.title.lower()}
+        for slug_b in slugs[i + 1:]:
+            eb = graph.entities[slug_b]
+            if ea.type != eb.type:
+                continue
+            aliases_b = {a.lower() for a in eb.aliases} | {eb.title.lower()}
+            if aliases_a & aliases_b:
+                pair = tuple(sorted([slug_a, slug_b]))
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    counts["merge_candidates"] += 1
+
+    # Prune candidates
+    related = {r.from_entity for r in graph.relations} | {r.to_entity for r in graph.relations}
+    for eid, entity in graph.entities.items():
+        if entity.score < 0.1 and entity.frequency <= 1 and entity.retention != "permanent" and eid not in related:
+            if entity.created:
+                try:
+                    age = (today - date.fromisoformat(entity.created)).days
+                    if age > 90:
+                        counts["prune_candidates"] += 1
+                except (ValueError, TypeError):
+                    pass
+
+    # Summary candidates
+    for eid, entity in graph.entities.items():
+        if not entity.summary:
+            counts["summary_candidates"] += 1
+
+    stats = "\n".join(f"- {k.replace('_', ' ').title()}: {v}" for k, v in counts.items())
+    return stats, counts
+
+
+def _validate_step(step_num: int, summary: str, config: Config, report: DreamReport) -> str:
+    """Validate a critical step result via LLM. Returns updated summary."""
+    step_names = {3: "Fact Consolidation", 4: "Entity Merging", 5: "Relation Discovery"}
+    step_name = step_names.get(step_num, f"Step {step_num}")
+    try:
+        from src.core.llm import call_dream_validate
+        validation = call_dream_validate(step_name, summary, config)
+        if not validation.approved:
+            issues = "; ".join(validation.issues)
+            report.errors.append(f"Validation warning for {step_name}: {issues}")
+            return f"{summary} [!validated: {issues[:30]}]"
+        return f"{summary} [validated]"
+    except Exception as e:
+        logger.warning("Validation failed for step %d: %s", step_num, e)
+        return summary
 
 
 # ── Step implementations ─────────────────────────────────────
@@ -125,6 +252,78 @@ def _step_load(memory_path: Path) -> tuple[GraphData, dict[str, Path]]:
     return graph, entity_paths
 
 
+def _step_extract_documents(
+    graph: GraphData,
+    memory_path: Path,
+    config: Config,
+    console: Console,
+    report: DreamReport,
+    dry_run: bool,
+) -> int:
+    """Step 2: Extract entities from unprocessed RAG documents."""
+    from src.pipeline.indexer import list_unextracted_docs, mark_doc_extracted
+    from src.pipeline.extractor import extract_from_chat, sanitize_extraction
+    from src.pipeline.resolver import resolve_all
+    from src.pipeline.enricher import enrich_memory
+    from src.pipeline.orchestrator import make_faiss_fn
+    import pickle
+
+    docs = list_unextracted_docs(config.faiss.manifest_path)
+    if not docs:
+        return 0
+
+    console.print(f"  Found {len(docs)} unextracted document(s)")
+    extracted = 0
+
+    for doc in docs:
+        source_id = doc["source_id"]
+        doc_key = doc["key"]
+
+        if dry_run:
+            console.print(f"  [dim]Would extract entities from: {source_id}[/dim]")
+            extracted += 1
+            continue
+
+        # Reconstruct text from FAISS chunks
+        mapping_path = Path(config.faiss.mapping_path)
+        if not mapping_path.exists():
+            continue
+
+        with open(mapping_path, "rb") as f:
+            chunk_mapping = pickle.load(f)
+
+        # Gather chunks for this document, sorted by index
+        doc_chunks = sorted(
+            [c for c in chunk_mapping if c.get("file") == doc_key],
+            key=lambda c: c.get("chunk_idx", 0),
+        )
+        if not doc_chunks:
+            continue
+
+        text = "\n".join(c.get("chunk_text", "") for c in doc_chunks)
+        if not text.strip():
+            continue
+
+        console.print(f"  [cyan]Extracting from: {source_id}[/cyan]")
+        try:
+            extraction = extract_from_chat(text, config)
+            extraction = sanitize_extraction(extraction)
+
+            if extraction.entities:
+                resolved = resolve_all(extraction, graph, faiss_search_fn=make_faiss_fn(config, memory_path))
+                enrich_memory(resolved, config)
+                console.print(f"    [green]{len(extraction.entities)} entities extracted[/green]")
+
+            mark_doc_extracted(config.faiss.manifest_path, doc_key)
+            extracted += 1
+        except Exception as e:
+            report.errors.append(f"Doc extraction failed for {source_id}: {e}")
+            console.print(f"    [yellow]Failed: {e}[/yellow]")
+
+    report.docs_extracted = extracted
+    return extracted
+
+
 def _step_consolidate_facts(
     graph: GraphData,
     entity_paths: dict[str, Path],
@@ -134,7 +333,7 @@ def _step_consolidate_facts(
     dry_run: bool,
     min_facts: int = 8,
 ) -> None:
-    """Step 2: Consolidate redundant observations for entities with many facts."""
+    """Step 3: Consolidate redundant observations for entities with many facts."""
     from src.memory.store import read_entity, consolidate_entity_facts
 
     for eid, path in entity_paths.items():
@@ -171,9 +370,7 @@ def _step_merge_entities(
     report: DreamReport,
     dry_run: bool,
 ) -> None:
-    """Step 3: Detect and merge duplicate entities (slug similarity + FAISS)."""
-    from src.core.utils import slugify
-
+    """Step 4: Detect and merge duplicate entities (slug similarity + FAISS)."""
     # Group by slug similarity (prefix match or containment)
     slugs = list(graph.entities.keys())
     merge_candidates: list[tuple[str, str]] = []
@@ -181,7 +378,6 @@ def _step_merge_entities(
 
     for i, slug_a in enumerate(slugs):
         entity_a = graph.entities[slug_a]
-        # Check aliases overlap
         aliases_a = {a.lower() for a in entity_a.aliases} | {entity_a.title.lower()}
 
         for slug_b in slugs[i + 1:]:
@@ -191,7 +387,6 @@ def _step_merge_entities(
 
             aliases_b = {a.lower() for a in entity_b.aliases} | {entity_b.title.lower()}
 
-            # Check overlap: title of one matches alias/title of other
             if aliases_a & aliases_b:
                 pair = tuple(sorted([slug_a, slug_b]))
                 if pair not in seen_pairs:
@@ -208,7 +403,6 @@ def _step_merge_entities(
         if not entity_a or not entity_b:
             continue
 
-        # Keep the one with higher score
         keep, drop = (slug_a, slug_b) if entity_a.score >= entity_b.score else (slug_b, slug_a)
         keep_entity = graph.entities[keep]
         drop_entity = graph.entities[drop]
@@ -218,12 +412,12 @@ def _step_merge_entities(
             report.entities_merged += 1
             continue
 
-        console.print(f"  [cyan]Merging '{drop_entity.title}' → '{keep_entity.title}'[/cyan]")
+        console.print(f"  [cyan]Merging '{drop_entity.title}' -> '{keep_entity.title}'[/cyan]")
         try:
             _do_merge(keep, drop, graph, memory_path, config)
             report.entities_merged += 1
         except Exception as e:
-            report.errors.append(f"Merge failed {drop} → {keep}: {e}")
+            report.errors.append(f"Merge failed {drop} -> {keep}: {e}")
             console.print(f"    [yellow]Failed: {e}[/yellow]")
 
 
@@ -314,9 +508,8 @@ def _step_discover_relations(
     report: DreamReport,
     dry_run: bool,
 ) -> None:
-    """Step 4: Use FAISS similarity + LLM to discover new relations."""
+    """Step 5: Use FAISS similarity + LLM to discover new relations."""
     from src.pipeline.indexer import search as faiss_search
-    from src.memory.store import read_entity
     from src.memory.graph import add_relation, save_graph
 
     # Build existing relation set for fast lookup
@@ -362,12 +555,11 @@ def _step_discover_relations(
         if not entity_a or not entity_b:
             continue
 
-        # Build dossiers
         dossier_a = _build_dossier(eid_a, entity_a, memory_path)
         dossier_b = _build_dossier(eid_b, entity_b, memory_path)
 
         if dry_run:
-            console.print(f"  [dim]Would evaluate: {entity_a.title} ↔ {entity_b.title}[/dim]")
+            console.print(f"  [dim]Would evaluate: {entity_a.title} <-> {entity_b.title}[/dim]")
             continue
 
         try:
@@ -391,7 +583,7 @@ def _step_discover_relations(
                 )
                 add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
                 discovered += 1
-                console.print(f"    [green]{entity_a.title} → {rel_type} → {entity_b.title}[/green]")
+                console.print(f"    [green]{entity_a.title} -> {rel_type} -> {entity_b.title}[/green]")
         except Exception as e:
             report.errors.append(f"Relation discovery failed for {eid_a}/{eid_b}: {e}")
 
@@ -437,7 +629,7 @@ def _step_prune_dead(
     max_frequency: int = 1,
     min_age_days: int = 90,
 ) -> None:
-    """Step 5: Archive low-score orphan entities."""
+    """Step 6: Archive low-score orphan entities."""
     today = date.today()
 
     # Build set of entities that have relations
@@ -457,7 +649,6 @@ def _step_prune_dead(
         if eid in related_entities:
             continue
 
-        # Check age
         if entity.created:
             try:
                 created_date = date.fromisoformat(entity.created)
@@ -495,7 +686,6 @@ def _step_prune_dead(
             report.errors.append(f"Prune failed for {eid}: {e}")
 
     if not dry_run:
-        # Clean up orphan relations
         from src.memory.graph import remove_orphan_relations, save_graph
         remove_orphan_relations(graph)
         save_graph(memory_path, graph)
@@ -509,7 +699,7 @@ def _step_generate_summaries(
     report: DreamReport,
     dry_run: bool,
 ) -> None:
-    """Step 6: Generate/refresh entity summaries via LLM."""
+    """Step 7: Generate/refresh entity summaries via LLM."""
     from src.core.llm import call_entity_summary
     from src.memory.store import read_entity, write_entity
 
@@ -520,7 +710,6 @@ def _step_generate_summaries(
         if eid not in graph.entities:
             continue  # May have been pruned
 
-        # Skip if summary already exists and entity hasn't changed much
         if entity.summary:
             continue
 
@@ -531,7 +720,6 @@ def _step_generate_summaries(
             if not live_facts:
                 continue
 
-            # Build relation descriptions
             relations = []
             for rel in graph.relations:
                 if rel.from_entity == eid:
@@ -556,7 +744,8 @@ def _step_generate_summaries(
                 entity.summary = summary
                 write_entity(path, fm, sections)
                 report.summaries_generated += 1
-                console.print(f"  [green]{entity.title}: {summary[:60]}...[/green]" if len(summary) > 60 else f"  [green]{entity.title}: {summary}[/green]")
+                display = f"{summary[:60]}..." if len(summary) > 60 else summary
+                console.print(f"  [green]{entity.title}: {display}[/green]")
         except Exception as e:
             report.errors.append(f"Summary generation failed for {eid}: {e}")
             console.print(f"    [yellow]Skipped {eid}: {e}[/yellow]")
@@ -568,25 +757,21 @@ def _step_rebuild(
     config: Config,
     console: Console,
 ) -> None:
-    """Step 8: Rebuild context and FAISS index."""
+    """Step 9: Rebuild context and FAISS index."""
     from src.memory.context import build_context, write_context, write_index
     from src.memory.graph import save_graph
     from src.pipeline.indexer import build_index
 
-    # Save graph first
     save_graph(memory_path, graph)
 
-    # Rebuild context
     context_text = build_context(graph, memory_path, config)
     if context_text.strip():
         write_context(memory_path, context_text)
         console.print("  [green]_context.md updated[/green]")
 
-    # Rebuild index
     write_index(memory_path, graph)
     console.print("  [green]_index.md updated[/green]")
 
-    # Rebuild FAISS
     try:
         manifest = build_index(memory_path, config)
         n_files = len(manifest.get("indexed_files", {}))

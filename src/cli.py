@@ -437,13 +437,14 @@ def consolidate(ctx, dry_run, facts, min_facts):
 
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Show what would change without modifying")
-@click.option("--step", type=int, default=None, help="Run only step N (1-8)")
+@click.option("--step", type=int, default=None, help="Run only step N (1-9)")
 @click.pass_context
 def dream(ctx, dry_run, step):
     """Brain-like memory reorganization: consolidate, prune, discover, rebuild.
 
-    8 steps: load → consolidate facts → merge entities → discover relations
-    → prune dead → generate summaries → rescore → rebuild.
+    9 steps: load → extract docs → consolidate facts → merge entities
+    → discover relations → prune dead → generate summaries → rescore → rebuild.
+    LLM coordinator plans which steps to run.
     """
     from src.pipeline.dream import run_dream
 
@@ -456,6 +457,7 @@ def dream(ctx, dry_run, step):
 
     # Summary
     console.print("\n[bold]Dream report:[/bold]")
+    console.print(f"  Docs extracted: {report.docs_extracted}")
     console.print(f"  Facts consolidated: {report.facts_consolidated}")
     console.print(f"  Entities merged: {report.entities_merged}")
     console.print(f"  Relations discovered: {report.relations_discovered}")
@@ -467,6 +469,27 @@ def dream(ctx, dry_run, step):
             console.print(f"    [dim]{err}[/dim]")
 
     console.print("\n[bold green]Dream complete.[/bold green]")
+
+
+@cli.command()
+@click.pass_context
+def context(ctx):
+    """Rebuild _context.md from current graph (no extraction, no LLM)."""
+    config = ctx.obj["config"]
+    from src.memory.graph import load_graph, save_graph
+    from src.memory.context import build_context, write_context, write_index
+    from src.memory.scoring import recalculate_all_scores
+
+    console.print("[bold]Rebuilding context...[/bold]")
+    graph = load_graph(config.memory_path)
+    graph = recalculate_all_scores(graph, config)
+    save_graph(config.memory_path, graph)
+
+    context_text = build_context(graph, config.memory_path, config)
+    if context_text.strip():
+        write_context(config.memory_path, context_text)
+    write_index(config.memory_path, graph)
+    console.print("[green]✓ _context.md and _index.md updated[/green]")
 
 
 @cli.command()

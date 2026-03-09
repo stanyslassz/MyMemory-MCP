@@ -411,3 +411,38 @@ def call_relation_discovery(
         entity_b_dossier=entity_b_dossier,
     )
     return _call_structured(config.llm_dream_effective, prompt, RelationProposal)
+
+
+def call_dream_plan(memory_stats: str, config: Config) -> "DreamPlan":
+    """Ask LLM to plan which dream steps to execute."""
+    from src.core.models import DreamPlan
+
+    schema = json.dumps(DreamPlan.model_json_schema(), indent=2)
+    prompt = load_prompt(
+        "dream_plan",
+        config,
+        memory_stats=memory_stats,
+        json_schema=schema,
+        unextracted_docs="(see stats)",
+        consolidation_candidates="(see stats)",
+        merge_candidates="(see stats)",
+        relation_candidates="(see stats)",
+        prune_candidates="(see stats)",
+        summary_candidates="(see stats)",
+    )
+    return _call_structured(config.llm_dream_effective, prompt, DreamPlan)
+
+
+def call_dream_validate(step_name: str, changes_summary: str, config: Config) -> "DreamValidation":
+    """Ask LLM to validate results of a dream step."""
+    from src.core.models import DreamValidation
+
+    schema = json.dumps(DreamValidation.model_json_schema(), indent=2)
+    prompt = load_prompt(
+        "dream_validate",
+        config,
+        step_name=step_name,
+        changes_summary=changes_summary,
+        json_schema=schema,
+    )
+    return _call_structured(config.llm_dream_effective, prompt, DreamValidation)
