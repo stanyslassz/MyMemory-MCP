@@ -15,7 +15,7 @@ from src.core.utils import parse_frontmatter as _shared_parse_frontmatter
 
 def init_memory_structure(memory_path: Path) -> None:
     """Create memory folder structure if missing."""
-    folders = ["self", "close_ones", "projects", "work", "interests", "chats", "_inbox/_processed"]
+    folders = ["self", "close_ones", "projects", "work", "interests", "chats", "_inbox/_processed", "_archive"]
     for folder in folders:
         (memory_path / folder).mkdir(parents=True, exist_ok=True)
 

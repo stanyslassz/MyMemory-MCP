@@ -38,7 +38,11 @@ def cli(ctx, verbose, config_path):
     _setup_logging(verbose)
     ctx.ensure_object(dict)
     project_root = Path.cwd()
-    ctx.obj["config"] = load_config(config_path=config_path, project_root=project_root)
+    config = load_config(config_path=config_path, project_root=project_root)
+    ctx.obj["config"] = config
+
+    from src.memory.store import init_memory_structure
+    init_memory_structure(config.memory_path)
 
 
 @cli.command()
