@@ -310,3 +310,46 @@ def test_rebuild_from_md_reads_mention_dates(tmp_path):
     assert sophie.mention_dates == ["2026-03-03", "2026-03-05"]
     assert sophie.created == "2026-03-03"
     assert sophie.monthly_buckets == {}
+
+
+def test_rebuild_from_md_computes_negative_valence_ratio(tmp_path):
+    """rebuild_from_md should compute negative_valence_ratio from facts."""
+    entity_dir = tmp_path / "self"
+    entity_dir.mkdir(parents=True)
+    (entity_dir / "health-issue.md").write_text(
+        "---\n"
+        "title: Health Issue\n"
+        "type: health\n"
+        "---\n\n## Facts\n\n"
+        "- [diagnosis] Chronic pain [-]\n"
+        "- [treatment] Physical therapy [+]\n"
+        "- [vigilance] Watch for flare-ups\n"
+        "- [fact] Regular checkups\n\n"
+        "## Relations\n\n## History\n",
+        encoding="utf-8",
+    )
+
+    from src.memory.graph import rebuild_from_md
+    graph = rebuild_from_md(tmp_path)
+
+    entity = graph.entities["health-issue"]
+    # 4 facts total: diagnosis [-] counts, treatment counts (emotional cat),
+    # vigilance counts (emotional cat), fact doesn't count = 3/4 = 0.75
+    assert entity.negative_valence_ratio == 0.75
+
+
+def test_rebuild_from_md_zero_valence_ratio_no_facts(tmp_path):
+    """Entity with no facts should have 0.0 negative_valence_ratio."""
+    entity_dir = tmp_path / "interests"
+    entity_dir.mkdir(parents=True)
+    (entity_dir / "hobby.md").write_text(
+        "---\n"
+        "title: Hobby\n"
+        "type: interest\n"
+        "---\n\n## Facts\n\n## Relations\n\n## History\n",
+        encoding="utf-8",
+    )
+
+    from src.memory.graph import rebuild_from_md
+    graph = rebuild_from_md(tmp_path)
+    assert graph.entities["hobby"].negative_valence_ratio == 0.0

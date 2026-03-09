@@ -83,3 +83,48 @@ def test_resolve_by_title():
     res = resolve_entity("Natation", graph)
     assert res.status == "resolved"
     assert res.entity_id == "natation"
+
+
+# ── GAP 5: Context-aware resolution ──────────────────────────
+
+
+def test_resolve_entity_with_context_passes_enriched_query():
+    """FAISS search should receive context-enriched query when observation_context provided."""
+    graph = _make_graph()
+    calls = []
+
+    def mock_faiss(query, top_k=3, threshold=0.75):
+        calls.append(query)
+        return []
+
+    resolve_entity("Apple", graph, faiss_search_fn=mock_faiss, observation_context="health fruit eating")
+    assert len(calls) == 1
+    assert "Apple" in calls[0]
+    assert "health" in calls[0]
+    assert "fruit" in calls[0]
+
+
+def test_resolve_all_passes_observation_context():
+    """resolve_all should build context from first observation and pass it to FAISS."""
+    graph = _make_graph()
+    calls = []
+
+    def mock_faiss(query, top_k=3, threshold=0.75):
+        calls.append(query)
+        return []
+
+    extraction = RawExtraction(
+        entities=[
+            RawEntity(name="Apple", type="interest", observations=[
+                RawObservation(category="fact", content="Bought stock in tech company", importance=0.5),
+            ]),
+        ],
+        relations=[],
+        summary="Test",
+    )
+    resolve_all(extraction, graph, faiss_search_fn=mock_faiss)
+    assert len(calls) == 1
+    # Should contain entity name + category + content prefix
+    assert "Apple" in calls[0]
+    assert "fact" in calls[0]
+    assert "Bought stock" in calls[0]

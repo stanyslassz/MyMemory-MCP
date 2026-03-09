@@ -104,6 +104,8 @@ class GraphEntity(BaseModel):
     monthly_buckets: dict[str, int] = Field(default_factory=dict)
     created: str = ""
     summary: str = ""
+    # Cognitive audit: emotional modulation (computed from facts during rebuild)
+    negative_valence_ratio: float = 0.0
 
 
 class GraphRelation(BaseModel):

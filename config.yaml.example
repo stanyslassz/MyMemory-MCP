@@ -67,7 +67,12 @@ scoring:
   spreading_weight: 0.2          # Weight of spreading activation bonus
   permanent_min_score: 0.5       # Floor score for permanent entities
   relation_strength_base: 0.5    # Initial relation strength
-  relation_decay_halflife: 180   # Days for unreinforced relations to halve
+  relation_decay_halflife: 180   # Days for relation effective strength halflife (spreading)
+  relation_strength_growth: 0.05 # Hebbian strength increment per co-occurrence
+  relation_ltd_halflife: 360     # Days for stored strength LTD decay (Long-Term Depression)
+  relation_decay_power: 0.3      # Power-law exponent for relation effective strength decay
+  retrieval_threshold: 0.05      # Below this score → true forgetting (ACT-R retrieval failure)
+  emotional_boost_weight: 0.15   # Amygdala modulation: negative/vigilance facts boost consolidation
   window_size: 50                # Recent mention dates to keep precisely
   min_score_for_context: 0.3     # Minimum score to appear in context
 

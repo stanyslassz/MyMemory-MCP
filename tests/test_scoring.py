@@ -6,7 +6,7 @@ from src.core.config import ScoringConfig, Config
 from src.core.models import GraphData, GraphEntity, GraphRelation
 from src.memory.scoring import (
     calculate_score, calculate_actr_base, recalculate_all_scores,
-    get_top_entities, spreading_activation,
+    get_top_entities, spreading_activation, _apply_ltd,
 )
 
 
@@ -328,3 +328,187 @@ def test_get_top_entities_min_score():
     ids = [eid for eid, _ in top]
     assert "high" in ids
     assert "low" not in ids
+
+
+# ── GAP 1: LTD (Long-Term Depression) ────────────────────────
+
+
+def test_ltd_decays_stale_relations():
+    """Relations not reinforced for >90 days should have reduced stored strength."""
+    config = _make_config()
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(
+        file="self/a.md", type="health", title="A",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.entities["b"] = GraphEntity(
+        file="self/b.md", type="health", title="B",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.relations = [
+        GraphRelation(from_entity="a", to_entity="b", type="affects",
+                      strength=0.8, last_reinforced="2025-06-01"),  # ~9 months old
+    ]
+    original_strength = graph.relations[0].strength
+    _apply_ltd(graph, config, today)
+    assert graph.relations[0].strength < original_strength
+    assert graph.relations[0].strength >= 0.1  # minimum floor
+
+
+def test_ltd_preserves_fresh_relations():
+    """Relations reinforced recently (<90 days) should not decay."""
+    config = _make_config()
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(
+        file="self/a.md", type="health", title="A",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.entities["b"] = GraphEntity(
+        file="self/b.md", type="health", title="B",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.relations = [
+        GraphRelation(from_entity="a", to_entity="b", type="affects",
+                      strength=0.8, last_reinforced="2026-02-15"),  # <90 days
+    ]
+    _apply_ltd(graph, config, today)
+    assert graph.relations[0].strength == 0.8  # unchanged
+
+
+def test_ltd_minimum_floor():
+    """LTD should not reduce strength below 0.1."""
+    config = _make_config()
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["a"] = GraphEntity(
+        file="self/a.md", type="health", title="A",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.entities["b"] = GraphEntity(
+        file="self/b.md", type="health", title="B",
+        importance=0.5, mention_dates=["2026-03-05"],
+    )
+    graph.relations = [
+        GraphRelation(from_entity="a", to_entity="b", type="affects",
+                      strength=0.15, last_reinforced="2020-01-01"),  # very old
+    ]
+    _apply_ltd(graph, config, today)
+    assert graph.relations[0].strength == 0.1
+
+
+# ── GAP 2: Retrieval threshold ────────────────────────────────
+
+
+def test_retrieval_threshold_true_forgetting():
+    """Entities with very low activation should score exactly 0.0."""
+    config = _make_config(retrieval_threshold=0.05)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Forgotten",
+        importance=0.0, mention_dates=["2018-01-01"],  # 8 years ago, low importance
+    )
+    score = calculate_score(entity, config, today)
+    assert score == 0.0, f"Expected 0.0 for truly forgotten entity, got {score}"
+
+
+def test_retrieval_threshold_spares_permanent():
+    """Permanent entities should never be zeroed out by retrieval threshold."""
+    config = _make_config(retrieval_threshold=0.05)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Perm",
+        importance=0.0, retention="permanent",
+        mention_dates=["2018-01-01"],
+    )
+    score = calculate_score(entity, config, today)
+    assert score >= config.scoring.permanent_min_score
+
+
+def test_retrieval_threshold_passes_active_entities():
+    """Active entities should not be affected by retrieval threshold."""
+    config = _make_config(retrieval_threshold=0.05)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Active",
+        importance=0.8, mention_dates=["2026-03-05"] * 5,
+    )
+    score = calculate_score(entity, config, today)
+    assert score > 0.5
+
+
+# ── GAP 3: Power-law relation decay ──────────────────────────
+
+
+def test_power_law_relation_decay():
+    """Spreading activation should use power-law decay for relation effective strength.
+
+    A 1-day-old relation should have much higher effective strength than a 365-day one,
+    following power-law (days+0.5)^(-d) rather than exponential.
+    """
+    config = _make_config(relation_decay_power=0.3)
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["hub"] = GraphEntity(
+        file="self/hub.md", type="health", title="Hub",
+        importance=0.9, mention_dates=["2026-03-05"] * 5,
+    )
+    graph.entities["anchor"] = GraphEntity(
+        file="self/anchor.md", type="health", title="Anchor",
+        importance=0.1, mention_dates=["2020-01-01"],
+    )
+    graph.entities["fresh_link"] = GraphEntity(
+        file="self/fl.md", type="health", title="FreshLink",
+        importance=0.1, mention_dates=["2025-01-01"],
+    )
+    graph.entities["stale_link"] = GraphEntity(
+        file="self/sl.md", type="health", title="StaleLink",
+        importance=0.1, mention_dates=["2025-01-01"],
+    )
+    graph.relations = [
+        # Both connect to same anchor with same strength
+        GraphRelation(from_entity="anchor", to_entity="fresh_link", type="affects",
+                      strength=0.8, last_reinforced="2026-03-01"),
+        GraphRelation(from_entity="anchor", to_entity="stale_link", type="affects",
+                      strength=0.8, last_reinforced="2026-03-01"),
+        # fresh_link has a fresh relation to hub
+        GraphRelation(from_entity="hub", to_entity="fresh_link", type="affects",
+                      strength=0.8, last_reinforced="2026-03-04"),
+        # stale_link has a stale relation to hub
+        GraphRelation(from_entity="hub", to_entity="stale_link", type="affects",
+                      strength=0.8, last_reinforced="2024-03-05"),
+    ]
+    spreading = spreading_activation(graph, config, today)
+    assert spreading["fresh_link"] > spreading["stale_link"]
+
+
+# ── GAP 4: Emotional valence boost ───────────────────────────
+
+
+def test_emotional_boost_negative_valence():
+    """Entities with high negative_valence_ratio should score higher (amygdala effect)."""
+    config = _make_config(emotional_boost_weight=0.15)
+    today = date(2026, 3, 5)
+    kwargs = dict(
+        file="self/a.md", type="health", title="X",
+        importance=0.5,
+        mention_dates=["2026-01-01", "2026-02-01"],
+    )
+    neutral = GraphEntity(**kwargs, negative_valence_ratio=0.0)
+    emotional = GraphEntity(**kwargs, negative_valence_ratio=0.8)
+    assert calculate_score(emotional, config, today) > calculate_score(neutral, config, today)
+
+
+def test_emotional_boost_zero_when_no_negative():
+    """Entity with no negative facts should get no emotional boost."""
+    config = _make_config(emotional_boost_weight=0.15)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Neutral",
+        importance=0.5, mention_dates=["2026-03-01"],
+        negative_valence_ratio=0.0,
+    )
+    # Score should be the same as without the feature
+    config_no_emotion = _make_config(emotional_boost_weight=0.0)
+    assert calculate_score(entity, config, today) == calculate_score(entity, config_no_emotion, today)

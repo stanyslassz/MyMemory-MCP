@@ -49,6 +49,10 @@ class ScoringConfig:
     relation_strength_base: float = 0.5
     relation_decay_halflife: int = 180
     relation_strength_growth: float = 0.05
+    relation_ltd_halflife: int = 360
+    relation_decay_power: float = 0.3
+    retrieval_threshold: float = 0.05
+    emotional_boost_weight: float = 0.15
     window_size: int = 50
     min_score_for_context: float = 0.3
 
@@ -211,6 +215,10 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             relation_strength_base=scoring.get("relation_strength_base", 0.5),
             relation_decay_halflife=scoring.get("relation_decay_halflife", 180),
             relation_strength_growth=scoring.get("relation_strength_growth", 0.05),
+            relation_ltd_halflife=scoring.get("relation_ltd_halflife", 360),
+            relation_decay_power=scoring.get("relation_decay_power", 0.3),
+            retrieval_threshold=scoring.get("retrieval_threshold", 0.05),
+            emotional_boost_weight=scoring.get("emotional_boost_weight", 0.15),
             window_size=scoring.get("window_size", 50),
             min_score_for_context=scoring.get("min_score_for_context", 0.3),
         ),

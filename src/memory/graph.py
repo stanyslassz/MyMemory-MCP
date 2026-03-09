@@ -217,6 +217,7 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
                 monthly_buckets=fm_data.get("monthly_buckets", {}),
                 created=str(fm_data.get("created", "")),
                 summary=fm_data.get("summary", ""),
+                negative_valence_ratio=_compute_negative_valence_ratio(body),
             )
             graph.entities[slug] = entity
 
@@ -306,6 +307,37 @@ def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) ->
                     add_relation(graph, rel)
                 except Exception:
                     pass  # Invalid relation type, skip
+
+
+def _compute_negative_valence_ratio(body: str) -> float:
+    """Compute ratio of negative/vigilance/diagnosis facts in the Facts section.
+
+    Scans for [-] valence markers and [vigilance]/[diagnosis] categories.
+    Returns 0.0 if no facts found.
+    """
+    _EMOTIONAL_CATEGORIES = {"vigilance", "diagnosis", "treatment"}
+    in_facts = False
+    total = 0
+    negative_count = 0
+    for line in body.split("\n"):
+        if line.startswith("## Facts"):
+            in_facts = True
+            continue
+        if line.startswith("## ") and in_facts:
+            break
+        if in_facts and line.strip().startswith("- ["):
+            total += 1
+            # Check for negative valence marker
+            if "[-]" in line:
+                negative_count += 1
+            else:
+                # Check for emotional categories
+                cat_match = re.match(r"- \[(\w+)\]", line.strip())
+                if cat_match and cat_match.group(1) in _EMOTIONAL_CATEGORIES:
+                    negative_count += 1
+    if total == 0:
+        return 0.0
+    return round(negative_count / total, 4)
 
 
 def _slugify(text: str) -> str:

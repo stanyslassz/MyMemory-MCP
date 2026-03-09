@@ -64,13 +64,15 @@ def calculate_score(
     today: date | None = None,
     spreading_bonus: float = 0.0,
 ) -> float:
-    """Final score = sigmoid(B + beta + spreading_weight * S).
+    """Final score = sigmoid(B + beta + spreading_weight * S + emotional_boost).
 
     B = ACT-R base from calculate_actr_base
     beta = entity.importance * config.scoring.importance_weight
     S = spreading_bonus (passed externally)
+    emotional_boost = negative_valence_ratio * emotional_boost_weight (amygdala modulation)
     Uses decay_factor_short_term for short_term retention entities.
     Enforces permanent_min_score for permanent retention entities.
+    Applies retrieval_threshold: score < threshold → 0.0 (true forgetting).
     Returns round(score, 4).
     """
     if today is None:
@@ -87,14 +89,21 @@ def calculate_score(
     # Importance boost
     beta = entity.importance * s.importance_weight
 
+    # Emotional modulation (amygdala): negative/vigilance facts boost consolidation
+    emotional_boost = entity.negative_valence_ratio * s.emotional_boost_weight
+
     # Combined activation
-    activation = B + beta + s.spreading_weight * spreading_bonus
+    activation = B + beta + s.spreading_weight * spreading_bonus + emotional_boost
 
     score = _sigmoid(activation)
 
     # Enforce permanent minimum
     if entity.retention == "permanent":
         score = max(score, s.permanent_min_score)
+
+    # Retrieval threshold: below τ → true forgetting (ACT-R retrieval failure)
+    if entity.retention != "permanent" and score < s.retrieval_threshold:
+        score = 0.0
 
     return round(score, 4)
 
@@ -130,7 +139,7 @@ def spreading_activation(
     adjacency: dict[str, list[tuple[str, float]]] = defaultdict(list)
 
     for rel in graph.relations:
-        # Compute time-decayed strength
+        # Compute time-decayed strength using power-law (unified with ACT-R)
         days_since = 0.0
         if rel.last_reinforced:
             try:
@@ -139,9 +148,7 @@ def spreading_activation(
             except (ValueError, TypeError):
                 days_since = 365.0
 
-        effective_strength = rel.strength * math.exp(
-            -days_since / s.relation_decay_halflife
-        )
+        effective_strength = rel.strength * (days_since + 0.5) ** (-s.relation_decay_power)
 
         # Bidirectional
         adjacency[rel.to_entity].append((rel.from_entity, effective_strength))
@@ -170,14 +177,42 @@ def spreading_activation(
     return spreading
 
 
+def _apply_ltd(graph: GraphData, config: Config, today: date) -> None:
+    """Apply Long-Term Depression to relation strengths.
+
+    Synapses that haven't been reinforced decay over time (Hebb/LTD).
+    Uses slow exponential decay on stored strength — complementing the
+    effective strength power-law decay used in spreading activation.
+    Only triggers after 90 days of no reinforcement. Minimum strength 0.1.
+    """
+    s = config.scoring
+    for rel in graph.relations:
+        if not rel.last_reinforced:
+            continue
+        try:
+            d = date.fromisoformat(rel.last_reinforced)
+            days = (today - d).days
+        except (ValueError, TypeError):
+            continue
+        if days > 90:
+            decay = math.exp(-days / s.relation_ltd_halflife)
+            rel.strength = round(max(0.1, rel.strength * decay), 4)
+
+
 def recalculate_all_scores(
     graph: GraphData,
     config: Config,
     today: date | None = None,
 ) -> GraphData:
-    """Recalculate scores for all entities using ACT-R + spreading activation."""
+    """Recalculate scores for all entities using ACT-R + spreading activation.
+
+    Also applies LTD (Long-Term Depression) to relation stored strengths.
+    """
     if today is None:
         today = date.today()
+
+    # LTD: decay stored strength for non-reinforced relations
+    _apply_ltd(graph, config, today)
 
     bonuses = spreading_activation(graph, config, today)
 

@@ -18,14 +18,18 @@ def resolve_entity(
     name: str,
     graph: GraphData,
     faiss_search_fn: Optional[Callable] = None,
+    observation_context: str = "",
 ) -> Resolution:
     """Resolve a free-form entity name against the graph.
 
     Resolution order:
     1. Exact match by slug ID
     2. Alias containment check
-    3. FAISS similarity search (if available)
+    3. FAISS similarity search (if available, context-enriched query)
     4. New entity
+
+    observation_context: optional snippet from observations to disambiguate
+    homonyms (e.g., "Apple" as fruit vs company).
     """
     slug = slugify(name)
 
@@ -45,9 +49,11 @@ def resolve_entity(
             return Resolution(status="resolved", entity_id=entity_id)
 
     # 3. FAISS similarity search (if available)
+    # Context-aware: enrich query with observation context for better disambiguation
     if faiss_search_fn is not None:
         try:
-            similar = faiss_search_fn(name, top_k=3, threshold=0.75)
+            query = f"{name} {observation_context}".strip() if observation_context else name
+            similar = faiss_search_fn(query, top_k=3, threshold=0.75)
             if similar:
                 candidates = [s["entity_id"] for s in similar if "entity_id" in s]
                 if candidates:
@@ -68,7 +74,12 @@ def resolve_all(
     resolved_entities = []
 
     for entity in raw_extraction.entities:
-        resolution = resolve_entity(entity.name, graph, faiss_search_fn)
+        # Build observation context for FAISS disambiguation
+        obs_context = ""
+        if entity.observations:
+            obs = entity.observations[0]
+            obs_context = f"{obs.category} {obs.content[:50]}"
+        resolution = resolve_entity(entity.name, graph, faiss_search_fn, obs_context)
         resolved_entities.append(ResolvedEntity(raw=entity, resolution=resolution))
 
     return ResolvedExtraction(
