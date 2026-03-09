@@ -40,12 +40,19 @@ def _repaired_json():
         return
 
     original = json.loads
+    repair_count = 0
 
     def _patched(s, *args, **kwargs):
+        nonlocal repair_count
         try:
             return original(s, *args, **kwargs)
         except json.JSONDecodeError:
-            logger.warning("JSON parse failed, attempting repair...")
+            repair_count += 1
+            # First repair: warn. Subsequent: debug (streaming produces many partial chunks).
+            if repair_count == 1:
+                logger.warning("JSON parse failed, attempting repair...")
+            else:
+                logger.debug("JSON parse failed, attempting repair... (#%d)", repair_count)
             # Restore original json.loads during repair to avoid recursion
             # (json_repair internally calls json.loads)
             json.loads = original
