@@ -16,6 +16,7 @@ dependencies = [
     "sentence-transformers>=2.0",
     "rich>=13.0",
     "click>=8.0",
+    "json-repair>=0.30",
 ]
 
 [project.optional-dependencies]
