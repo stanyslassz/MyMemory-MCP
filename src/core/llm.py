@@ -351,6 +351,7 @@ def call_fact_consolidation(
     entity_type: str,
     facts_text: str,
     config: Config,
+    max_facts: int = 50,
 ) -> FactConsolidation:
     """Consolidate redundant observations for an entity via LLM."""
     prompt = load_prompt(
@@ -359,6 +360,7 @@ def call_fact_consolidation(
         entity_title=entity_title,
         entity_type=entity_type,
         facts_text=facts_text,
+        max_facts=str(max_facts),
     )
     return _call_structured(config.llm_context, prompt, FactConsolidation)
 

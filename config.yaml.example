@@ -118,6 +118,13 @@ ingest:
   max_retries: 3
   jobs_path: ./memory/_ingest_jobs.json
 
+# ── Max facts per entity type ─────────────────────────────────
+# Controls the target number of facts after consolidation.
+# Entities exceeding their limit are auto-consolidated.
+max_facts:
+  default: 50
+  ai_self: 20
+
 # ── Categories ─────────────────────────────────────────────────
 categories:
   observations:

@@ -122,6 +122,7 @@ class Config:
     nlp: NLPConfig = field(default_factory=NLPConfig)
     context_narrative: bool = False
     context_llm_sections: bool = False
+    max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})
 
     @property
     def user_language_name(self) -> str:
@@ -137,6 +138,10 @@ class Config:
     def get_folder_for_type(self, entity_type: str) -> str:
         """Return the memory subfolder for an entity type."""
         return self.categories.folders.get(entity_type, "interests")
+
+    def get_max_facts(self, entity_type: str) -> int:
+        """Return the max facts limit for an entity type."""
+        return self.max_facts.get(entity_type, self.max_facts.get("default", 50))
 
 
 def _build_llm_step(data: dict[str, Any]) -> LLMStepConfig:
@@ -205,6 +210,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         context_budget=mem.get("context_budget", {}),
         context_narrative=mem.get("context_narrative", False),
         context_llm_sections=mem.get("context_llm_sections", False),
+        max_facts=raw.get("max_facts", {"default": 50, "ai_self": 20}),
         scoring=ScoringConfig(
             model=scoring.get("model", "act_r"),
             decay_factor=scoring.get("decay_factor", 0.5),

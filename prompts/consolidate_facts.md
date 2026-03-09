@@ -18,6 +18,12 @@ Rules:
   it replaces in `replaces_indices`.
 - Observations that don't need merging should still appear in the output with their
   original index in `replaces_indices`.
+- You MUST produce at most {max_facts} consolidated observations total.
+- If there are more than {max_facts} distinct facts after merging, ruthlessly prioritize:
+  keep the most important, most recent, and most unique observations.
+  Discard older facts that are subsumed by newer ones or that are too specific to one conversation.
+- For ai_self entities: focus on enduring communication style and interaction patterns.
+  Drop project-specific instructions, technical specs, or one-off situational rules.
 - All content MUST remain in {user_language}.
 - Respond ONLY with valid JSON.
 

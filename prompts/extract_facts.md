@@ -24,6 +24,9 @@ Rules:
 - Also extract interaction style observations: how the user likes to be responded to,
   what formats they prefer, what annoys them. Store these as entity "AI Personality"
   with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
+- IMPORTANT: For AI Personality, extract at most 3 observations per conversation.
+  Only extract NOVEL, enduring communication preferences — not project-specific
+  instructions, technical details, or one-off requests.
 - Information about the user themselves (their job, health, skills, preferences) should
   be attached to specialized entities (type "health" for medical, "work" for job, etc.).
   Do NOT create entities of type "person" for the user — only for other people.

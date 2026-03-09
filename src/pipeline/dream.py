@@ -177,12 +177,14 @@ def _collect_dream_stats(
     except Exception:
         pass
 
-    # Consolidation candidates (8+ facts)
+    # Consolidation candidates (facts > max_facts for type)
     for eid, path in entity_paths.items():
         try:
+            entity = graph.entities.get(eid)
+            max_facts = config.get_max_facts(entity.type) if entity else 50
             _, sections = read_entity(path)
             facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
-            if len(facts) >= 8:
+            if len(facts) > max_facts:
                 counts["consolidation_candidates"] += 1
         except Exception:
             pass
@@ -364,7 +366,6 @@ def _step_consolidate_facts(
     console: Console,
     report: DreamReport,
     dry_run: bool,
-    min_facts: int = 8,
 ) -> None:
     """Step 3: Consolidate redundant observations for entities with many facts."""
     from src.memory.store import read_entity, consolidate_entity_facts
@@ -374,19 +375,20 @@ def _step_consolidate_facts(
         if not entity:
             continue
         try:
+            max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
             live_facts = [f for f in facts if "[superseded]" not in f]
-            if len(live_facts) < min_facts:
+            if len(live_facts) <= max_facts:
                 continue
 
             if dry_run:
-                console.print(f"  [dim]Would consolidate {entity.title} ({len(live_facts)} facts)[/dim]")
+                console.print(f"  [dim]Would consolidate {entity.title} ({len(live_facts)} facts, max {max_facts})[/dim]")
                 report.facts_consolidated += 1
                 continue
 
-            console.print(f"  [cyan]Consolidating {entity.title} ({len(live_facts)} facts)...[/cyan]")
-            result = consolidate_entity_facts(path, config)
+            console.print(f"  [cyan]Consolidating {entity.title} ({len(live_facts)} facts, target {max_facts})...[/cyan]")
+            result = consolidate_entity_facts(path, config, max_facts=max_facts)
             if result["changes"]:
                 console.print(f"    [green]{', '.join(result['changes'])}[/green]")
                 report.facts_consolidated += 1

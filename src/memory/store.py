@@ -60,8 +60,12 @@ def update_entity(
     new_relations: list[str] | None = None,
     frequency_increment: int = 1,
     last_mentioned: str | None = None,
+    max_facts: int | None = None,
 ) -> EntityFrontmatter:
     """Update an existing entity: add observations, relations, bump frequency."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     frontmatter, sections = read_entity(filepath)
 
     # Add new observations (avoid duplicates: same category + similar content)
@@ -71,6 +75,17 @@ def update_entity(
             line = _format_observation(obs)
             if not _is_duplicate_observation(line, existing_facts):
                 existing_facts.append(line)
+        # Hard cap safety net: if way over limit, keep most recent
+        if max_facts:
+            live_facts = [f for f in existing_facts if "[superseded]" not in f]
+            if len(live_facts) > max_facts * 2:
+                _logger.warning(
+                    "Entity %s has %d facts (cap %d), truncating to %d most recent",
+                    frontmatter.title, len(live_facts), max_facts, max_facts * 2,
+                )
+                superseded = [f for f in existing_facts if "[superseded]" in f]
+                # Keep the last max_facts*2 live facts (most recently added)
+                existing_facts = live_facts[-(max_facts * 2):] + superseded
         sections["Facts"] = existing_facts
 
     # Add new relations (avoid duplicates)
@@ -169,6 +184,7 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
 def consolidate_entity_facts(
     filepath: Path,
     config,
+    max_facts: int | None = None,
 ) -> dict:
     """Consolidate redundant observations in an entity via LLM.
 
@@ -191,8 +207,10 @@ def consolidate_entity_facts(
     # Build indexed text for LLM
     indexed_text = "\n".join(f"{i}: {f}" for i, f in enumerate(live_facts))
 
+    effective_max = max_facts if max_facts else 50
     result = call_fact_consolidation(
         frontmatter.title, frontmatter.type, indexed_text, config,
+        max_facts=effective_max,
     )
 
     # Build new facts list from consolidated result (with length guard)

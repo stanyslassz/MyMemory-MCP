@@ -165,12 +165,13 @@ def auto_consolidate(memory_path, config, console, min_facts: int = 8) -> None:
         if not entity_path.exists():
             continue
         try:
+            max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
             live_facts = [f for f in facts if "[superseded]" not in f]
-            if len(live_facts) >= min_facts:
-                console.print(f"  [cyan]Auto-consolidating {entity.title} ({len(live_facts)} facts)...[/cyan]")
-                result = consolidate_entity_facts(entity_path, config)
+            if len(live_facts) > max_facts:
+                console.print(f"  [cyan]Auto-consolidating {entity.title} ({len(live_facts)} facts, max {max_facts})...[/cyan]")
+                result = consolidate_entity_facts(entity_path, config, max_facts=max_facts)
                 if result["changes"]:
                     console.print(f"    [green]{', '.join(result['changes'])}[/green]")
                     consolidated_count += 1
@@ -200,11 +201,14 @@ def consolidate_facts(config, console, dry_run: bool, min_facts: int) -> None:
         if not entity_path.exists():
             continue
         try:
+            max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
             live_facts = [f for f in facts if "[superseded]" not in f]
-            if len(live_facts) >= min_facts:
-                candidates.append((eid, entity, entity_path, len(live_facts)))
+            # Use the stricter of min_facts CLI arg or max_facts config
+            threshold = min(min_facts, max_facts)
+            if len(live_facts) >= threshold:
+                candidates.append((eid, entity, entity_path, len(live_facts), max_facts))
         except Exception:
             continue
 
@@ -212,18 +216,18 @@ def consolidate_facts(config, console, dry_run: bool, min_facts: int) -> None:
         console.print(f"[green]No entities with {min_facts}+ facts to consolidate.[/green]")
         return
 
-    console.print(f"[bold]Found {len(candidates)} entity/ies with {min_facts}+ facts:[/bold]")
-    for eid, entity, _, fact_count in candidates:
-        console.print(f"  {entity.title} ({entity.type}): {fact_count} facts")
+    console.print(f"[bold]Found {len(candidates)} entity/ies to consolidate:[/bold]")
+    for eid, entity, _, fact_count, max_f in candidates:
+        console.print(f"  {entity.title} ({entity.type}): {fact_count} facts (max {max_f})")
 
     if dry_run:
         console.print(f"\n[dim]Dry run -- no changes made. Run without --dry-run to consolidate.[/dim]")
         return
 
-    for eid, entity, entity_path, _ in candidates:
-        console.print(f"\n[cyan]→ Consolidating {entity.title}...[/cyan]")
+    for eid, entity, entity_path, _, max_f in candidates:
+        console.print(f"\n[cyan]→ Consolidating {entity.title} (target: {max_f})...[/cyan]")
         try:
-            result = consolidate_entity_facts(entity_path, config)
+            result = consolidate_entity_facts(entity_path, config, max_facts=max_f)
             if result["changes"]:
                 console.print(f"  [green]{', '.join(result['changes'])}[/green]")
             else:

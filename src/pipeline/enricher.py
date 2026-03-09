@@ -16,7 +16,7 @@ from src.core.models import (
 from src.memory.context import write_index
 from src.memory.graph import add_entity, add_relation, load_graph, save_graph
 from src.memory.scoring import recalculate_all_scores
-from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, write_entity
+from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, write_entity, consolidate_entity_facts
 from src.pipeline.resolver import slugify
 
 
@@ -49,7 +49,7 @@ def enrich_memory(
         try:
             if resolution.status == "resolved" and resolution.entity_id:
                 _update_existing_entity(
-                    resolution.entity_id, raw_entity, graph, memory_path, today, report
+                    resolution.entity_id, raw_entity, graph, memory_path, today, report, config
                 )
             elif resolution.status == "new":
                 slug = resolution.suggested_slug or slugify(raw_entity.name)
@@ -111,8 +111,12 @@ def _update_existing_entity(
     memory_path: Path,
     today: str,
     report: EnrichmentReport,
+    config: Config | None = None,
 ) -> None:
     """Update an existing entity with new observations."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     if entity_id not in graph.entities:
         return
 
@@ -135,6 +139,22 @@ def _update_existing_entity(
         sections["Facts"] = existing_facts
         write_entity(filepath, frontmatter, sections)
 
+    # Pre-consolidation gate: if adding facts would exceed max_facts, consolidate first
+    max_facts = None
+    if config is not None:
+        max_facts = config.get_max_facts(entity_meta.type)
+        _, sections = read_entity(filepath)
+        live_facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+        if len(live_facts) + len(raw_entity.observations) > max_facts:
+            _logger.info(
+                "Pre-consolidating %s (%d + %d > %d facts)",
+                entity_meta.title, len(live_facts), len(raw_entity.observations), max_facts,
+            )
+            try:
+                consolidate_entity_facts(filepath, config, max_facts=max_facts)
+            except Exception as e:
+                _logger.warning("Pre-consolidation failed for %s: %s", entity_id, e)
+
     # Prepare observations
     new_obs = [
         {"category": obs.category, "content": obs.content, "tags": obs.tags,
@@ -143,7 +163,7 @@ def _update_existing_entity(
     ]
 
     # Update MD file
-    update_entity(filepath, new_observations=new_obs, last_mentioned=today)
+    update_entity(filepath, new_observations=new_obs, last_mentioned=today, max_facts=max_facts)
 
     # Update graph metadata
     entity_meta.frequency += 1
