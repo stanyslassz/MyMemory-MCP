@@ -4,13 +4,131 @@ from __future__ import annotations
 
 import logging
 
+from typing import Union, get_args
+
 from src.core.config import Config
 from src.core.llm import call_extraction
-from src.core.models import RawExtraction, RawEntity
+from src.core.models import (
+    RawExtraction, RawEntity, RawObservation, RawRelation,
+    RelationType, EntityType, ObservationCategory,
+)
 from src.core.utils import estimate_tokens as _estimate_tokens
 from src.pipeline.resolver import slugify
 
 logger = logging.getLogger(__name__)
+
+# ── Valid sets (derived from Literal types) ──────────────────
+_VALID_RELATION_TYPES: set[str] = set(get_args(RelationType))
+_VALID_ENTITY_TYPES: set[str] = set(get_args(EntityType))
+_VALID_OBSERVATION_CATEGORIES: set[str] = set(get_args(ObservationCategory))
+
+# ── Fuzzy mapping for common LLM inventions ──────────────────
+_RELATION_FALLBACK: dict[str, str] = {
+    "prescrit_par": "linked_to",
+    "prescribed_by": "linked_to",
+    "travaille_a": "works_at",
+    "travaille_à": "works_at",
+    "ami_de": "friend_of",
+    "parent_de": "parent_of",
+    "vit_avec": "lives_with",
+    "utilise": "uses",
+    "fait_partie_de": "part_of",
+    "cause": "affects",
+    "ameliore": "improves",
+    "aggrave": "worsens",
+}
+
+
+def sanitize_extraction(raw: Union[RawExtraction, dict]) -> RawExtraction:
+    """Clean up LLM output: fix invalid types, null fields, empty refs.
+
+    Accepts either a RawExtraction or a raw dict (for cases where Pydantic
+    validation would fail on the raw LLM output). Returns a valid RawExtraction.
+    """
+    if isinstance(raw, RawExtraction):
+        data = raw.model_dump()
+    else:
+        data = raw
+
+    # Fix summary
+    if data.get("summary") is None:
+        logger.warning("Sanitized summary None → ''")
+        data["summary"] = ""
+
+    # Fix entities
+    clean_entities = []
+    for ent in data.get("entities", []):
+        name = (ent.get("name") or "").strip()
+        if not name:
+            logger.warning("Dropped entity with empty name")
+            continue
+
+        # Fix entity type
+        etype = ent.get("type", "")
+        if etype not in _VALID_ENTITY_TYPES:
+            logger.warning("Sanitized entity type '%s' → 'interest' for '%s'", etype, name)
+            ent["type"] = "interest"
+
+        # Fix observations
+        clean_obs = []
+        for obs in ent.get("observations", []):
+            content = (obs.get("content") or "").strip()
+            if not content:
+                logger.warning("Dropped observation with empty content in '%s'", name)
+                continue
+
+            cat = obs.get("category", "")
+            if cat not in _VALID_OBSERVATION_CATEGORIES:
+                logger.warning("Sanitized observation category '%s' → 'fact' in '%s'", cat, name)
+                obs["category"] = "fact"
+
+            # Clamp importance
+            imp = obs.get("importance", 0.5)
+            if imp is None:
+                imp = 0.5
+            obs["importance"] = max(0.0, min(1.0, float(imp)))
+
+            # Coerce None fields
+            if obs.get("valence") is None:
+                obs["valence"] = ""
+            if obs.get("date") is None:
+                obs["date"] = ""
+            if obs.get("supersedes") is None:
+                obs["supersedes"] = ""
+            if obs.get("tags") is None:
+                obs["tags"] = []
+
+            clean_obs.append(obs)
+
+        ent["observations"] = clean_obs
+        clean_entities.append(ent)
+
+    data["entities"] = clean_entities
+
+    # Fix relations
+    clean_relations = []
+    for rel in data.get("relations", []):
+        from_name = (rel.get("from_name") or "").strip()
+        to_name = (rel.get("to_name") or "").strip()
+        if not from_name or not to_name:
+            logger.warning("Dropped relation with empty ref: '%s' → '%s'", from_name, to_name)
+            continue
+
+        rtype = rel.get("type", "")
+        if rtype not in _VALID_RELATION_TYPES:
+            mapped = _RELATION_FALLBACK.get(rtype, "linked_to")
+            logger.warning("Sanitized relation type '%s' → '%s'", rtype, mapped)
+            rel["type"] = mapped
+
+        # Coerce None context
+        if rel.get("context") is None:
+            rel["context"] = ""
+
+        clean_relations.append(rel)
+
+    data["relations"] = clean_relations
+
+    return RawExtraction(**data)
 
 
 def _merge_extractions(extractions: list[RawExtraction]) -> RawExtraction:
