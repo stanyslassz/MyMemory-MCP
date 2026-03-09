@@ -116,6 +116,7 @@ class Config:
     ingest: IngestConfig = field(default_factory=IngestConfig)
     nlp: NLPConfig = field(default_factory=NLPConfig)
     context_narrative: bool = False
+    context_llm_sections: bool = False
 
     @property
     def user_language_name(self) -> str:
@@ -192,6 +193,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         context_max_tokens=mem.get("context_max_tokens", 3000),
         context_budget=mem.get("context_budget", {}),
         context_narrative=mem.get("context_narrative", False),
+        context_llm_sections=mem.get("context_llm_sections", False),
         scoring=ScoringConfig(
             model=scoring.get("model", "act_r"),
             decay_factor=scoring.get("decay_factor", 0.5),

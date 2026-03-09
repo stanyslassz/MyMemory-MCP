@@ -195,15 +195,19 @@ def consolidate_entity_facts(
         frontmatter.title, frontmatter.type, indexed_text, config,
     )
 
-    # Build new facts list from consolidated result
+    # Build new facts list from consolidated result (with length guard)
     new_facts = []
     for cf in result.consolidated:
+        content = cf.content
+        # Guard: if LLM produced a mega-line, truncate to 150 chars
+        if len(content) > 150:
+            content = content[:147] + "..."
         obs = {
             "category": cf.category,
-            "content": cf.content,
+            "content": content,
             "date": cf.date,
             "valence": cf.valence,
-            "tags": cf.tags,
+            "tags": cf.tags[:3],  # Max 3 tags per fact
         }
         new_facts.append(_format_observation(obs))
 

@@ -252,6 +252,39 @@ def call_context_generation(enriched_data: str, config: Config) -> str:
     return strip_thinking(text)
 
 
+def call_context_section(
+    section_name: str,
+    entities_dossier: str,
+    rag_context: str,
+    budget_tokens: int,
+    config: Config,
+) -> str:
+    """Generate a clean context section via LLM. Returns free-text markdown."""
+    prompt = load_prompt(
+        "context_section",
+        config,
+        section_name=section_name,
+        entities_dossier=entities_dossier,
+        rag_context=rag_context or "No additional context available.",
+        budget_tokens=str(budget_tokens),
+    )
+
+    step_config = config.llm_context
+    kwargs: dict[str, Any] = {
+        "model": step_config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": step_config.temperature,
+    }
+    if step_config.timeout:
+        kwargs["timeout"] = step_config.timeout
+    if step_config.api_base:
+        kwargs["api_base"] = step_config.api_base
+
+    response = litellm.completion(**kwargs)
+    text = response.choices[0].message.content or ""
+    return strip_thinking(text).strip()
+
+
 def call_fact_consolidation(
     entity_title: str,
     entity_type: str,

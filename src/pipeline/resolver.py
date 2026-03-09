@@ -47,7 +47,7 @@ def resolve_entity(
     # 3. FAISS similarity search (if available)
     if faiss_search_fn is not None:
         try:
-            similar = faiss_search_fn(name, top_k=3, threshold=0.85)
+            similar = faiss_search_fn(name, top_k=3, threshold=0.75)
             if similar:
                 candidates = [s["entity_id"] for s in similar if "entity_id" in s]
                 if candidates:
