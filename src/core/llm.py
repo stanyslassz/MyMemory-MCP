@@ -148,16 +148,21 @@ def _call_with_stall_detection(
     A stall is defined as no new tokens received for `stall_timeout` seconds.
     Active streaming resets the watchdog, so long but progressing responses
     are never killed.
+
+    First-token grace: the initial wait before any token arrives uses 2x
+    the stall_timeout, since some models (thinking models, large prompts)
+    take longer to produce the first token.
     """
     with _repaired_json():
         result: T | None = None
         error: Exception | None = None
         last_activity = time.monotonic()
+        first_token_received = False
         lock = threading.Lock()
         done = threading.Event()
 
         def _do_call():
-            nonlocal result, error, last_activity
+            nonlocal result, error, last_activity, first_token_received
             try:
                 client = _get_client(step_config)
                 kwargs: dict[str, Any] = {
@@ -181,6 +186,7 @@ def _call_with_stall_detection(
                         delta = time.monotonic() - last_activity
                         last_activity = time.monotonic()
                         chunk_count += 1
+                        first_token_received = True
                     chunk_str = str(chunk)
                     has_think = "<think>" in chunk_str or "</think>" in chunk_str
                     logger.debug(
@@ -198,20 +204,25 @@ def _call_with_stall_detection(
         worker.start()
 
         # Watchdog: check for stalls
+        # First-token grace: 2x stall_timeout before any token arrives
+        # (thinking models and large prompts need more time to start)
         while not done.is_set():
             done.wait(timeout=2.0)
             if done.is_set():
                 break
             with lock:
                 idle = time.monotonic() - last_activity
-            if idle > stall_timeout:
+                got_first = first_token_received
+            effective_timeout = stall_timeout if got_first else stall_timeout * 2
+            if idle > effective_timeout:
+                phase = "mid-stream" if got_first else "waiting for first token"
                 logger.warning(
-                    "LLM stall detected: no tokens for %.0fs (threshold=%ds)",
-                    idle, stall_timeout,
+                    "LLM stall detected (%s): no tokens for %.0fs (threshold=%ds)",
+                    phase, idle, effective_timeout,
                 )
                 error = StallError(
-                    f"LLM stalled: no progress for {idle:.0f}s "
-                    f"(stall_timeout={stall_timeout}s)"
+                    f"LLM stalled ({phase}): no progress for {idle:.0f}s "
+                    f"(stall_timeout={effective_timeout}s)"
                 )
                 done.set()
                 break
