@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -19,6 +20,46 @@ from src.core.models import EntityResolution, FactConsolidation, RawExtraction
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
+
+try:
+    from json_repair import repair_json as _repair_json
+except ImportError:
+    _repair_json = None
+
+
+@contextmanager
+def _repaired_json():
+    """Patch json.loads to auto-repair malformed LLM JSON output.
+
+    Uses json-repair library to fix common small-model errors:
+    unquoted keys, trailing commas, single quotes, etc.
+    Falls back to normal json.loads if json-repair is not installed.
+    """
+    if _repair_json is None:
+        yield
+        return
+
+    original = json.loads
+
+    def _patched(s, *args, **kwargs):
+        try:
+            return original(s, *args, **kwargs)
+        except json.JSONDecodeError:
+            logger.warning("JSON parse failed, attempting repair...")
+            # Restore original json.loads during repair to avoid recursion
+            # (json_repair internally calls json.loads)
+            json.loads = original
+            try:
+                repaired = _repair_json(s, return_objects=False)
+            finally:
+                json.loads = _patched
+            return original(repaired, *args, **kwargs)
+
+    json.loads = _patched
+    try:
+        yield
+    finally:
+        json.loads = original
 
 
 def strip_thinking(text: str) -> str:
@@ -87,7 +128,8 @@ def _call_structured(
     if step_config.api_base:
         kwargs["api_base"] = step_config.api_base
 
-    return client.chat.completions.create(**kwargs)
+    with _repaired_json():
+        return client.chat.completions.create(**kwargs)
 
 
 class StallError(TimeoutError):
@@ -107,77 +149,78 @@ def _call_with_stall_detection(
     Active streaming resets the watchdog, so long but progressing responses
     are never killed.
     """
-    result: T | None = None
-    error: Exception | None = None
-    last_activity = time.monotonic()
-    lock = threading.Lock()
-    done = threading.Event()
+    with _repaired_json():
+        result: T | None = None
+        error: Exception | None = None
+        last_activity = time.monotonic()
+        lock = threading.Lock()
+        done = threading.Event()
 
-    def _do_call():
-        nonlocal result, error, last_activity
-        try:
-            client = _get_client(step_config)
-            kwargs: dict[str, Any] = {
-                "model": step_config.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_model": response_model,
-                "max_retries": step_config.max_retries,
-                "temperature": step_config.temperature,
-                "stream": True,
-            }
-            if step_config.api_base:
-                kwargs["api_base"] = step_config.api_base
-            # Use a generous connection timeout but no overall read timeout —
-            # the watchdog thread handles stall detection instead.
-            kwargs["timeout"] = step_config.timeout * 3
+        def _do_call():
+            nonlocal result, error, last_activity
+            try:
+                client = _get_client(step_config)
+                kwargs: dict[str, Any] = {
+                    "model": step_config.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_model": response_model,
+                    "max_retries": step_config.max_retries,
+                    "temperature": step_config.temperature,
+                    "stream": True,
+                }
+                if step_config.api_base:
+                    kwargs["api_base"] = step_config.api_base
+                # Use a generous connection timeout but no overall read timeout —
+                # the watchdog thread handles stall detection instead.
+                kwargs["timeout"] = step_config.timeout * 3
 
-            partial = client.chat.completions.create_partial(**kwargs)
-            chunk_count = 0
-            for chunk in partial:
-                with lock:
-                    delta = time.monotonic() - last_activity
-                    last_activity = time.monotonic()
-                    chunk_count += 1
-                chunk_str = str(chunk)
-                has_think = "<think>" in chunk_str or "</think>" in chunk_str
-                logger.debug(
-                    "chunk #%d: %d chars, think=%s, delta=%.1fs",
-                    chunk_count, len(chunk_str), has_think, delta,
+                partial = client.chat.completions.create_partial(**kwargs)
+                chunk_count = 0
+                for chunk in partial:
+                    with lock:
+                        delta = time.monotonic() - last_activity
+                        last_activity = time.monotonic()
+                        chunk_count += 1
+                    chunk_str = str(chunk)
+                    has_think = "<think>" in chunk_str or "</think>" in chunk_str
+                    logger.debug(
+                        "chunk #%d: %d chars, think=%s, delta=%.1fs",
+                        chunk_count, len(chunk_str), has_think, delta,
+                    )
+                    result = chunk  # keep last complete partial
+                # Final result is the last chunk (fully validated by Instructor)
+            except Exception as e:
+                error = e
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=_do_call, daemon=True)
+        worker.start()
+
+        # Watchdog: check for stalls
+        while not done.is_set():
+            done.wait(timeout=2.0)
+            if done.is_set():
+                break
+            with lock:
+                idle = time.monotonic() - last_activity
+            if idle > stall_timeout:
+                logger.warning(
+                    "LLM stall detected: no tokens for %.0fs (threshold=%ds)",
+                    idle, stall_timeout,
                 )
-                result = chunk  # keep last complete partial
-            # Final result is the last chunk (fully validated by Instructor)
-        except Exception as e:
-            error = e
-        finally:
-            done.set()
+                error = StallError(
+                    f"LLM stalled: no progress for {idle:.0f}s "
+                    f"(stall_timeout={stall_timeout}s)"
+                )
+                done.set()
+                break
 
-    worker = threading.Thread(target=_do_call, daemon=True)
-    worker.start()
-
-    # Watchdog: check for stalls
-    while not done.is_set():
-        done.wait(timeout=2.0)
-        if done.is_set():
-            break
-        with lock:
-            idle = time.monotonic() - last_activity
-        if idle > stall_timeout:
-            logger.warning(
-                "LLM stall detected: no tokens for %.0fs (threshold=%ds)",
-                idle, stall_timeout,
-            )
-            error = StallError(
-                f"LLM stalled: no progress for {idle:.0f}s "
-                f"(stall_timeout={stall_timeout}s)"
-            )
-            done.set()
-            break
-
-    if error is not None:
-        raise error
-    if result is None:
-        raise StallError("LLM call produced no output")
-    return result
+        if error is not None:
+            raise error
+        if result is None:
+            raise StallError("LLM call produced no output")
+        return result
 
 
 def call_extraction(chat_content: str, config: Config) -> RawExtraction:

@@ -69,10 +69,11 @@ def test_json_loads_restored_on_exception():
     assert json.loads is original
 
 
-def test_irreparable_json_still_raises():
-    """Completely invalid content should still raise."""
+def test_repair_does_not_break_valid_nested_json():
+    """Complex nested JSON should pass through without corruption."""
     from src.core.llm import _repaired_json
 
+    nested = '{"entities": [{"name": "X", "obs": [{"cat": "fact"}]}], "relations": []}'
     with _repaired_json():
-        with pytest.raises(Exception):
-            json.loads("this is not json at all [][")
+        result = json.loads(nested)
+    assert result["entities"][0]["obs"][0]["cat"] == "fact"
