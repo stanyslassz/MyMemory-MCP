@@ -12,9 +12,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 from src.core.models import GraphData, GraphEntity, GraphRelation
+from src.core.utils import parse_frontmatter, slugify
 
 
 LOCK_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -282,13 +281,8 @@ def _release_lock(lock_path: Path) -> None:
 
 
 def _parse_frontmatter_raw(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from markdown text."""
-    match = re.match(r"^---\n(.*?\n)---\n(.*)", text, re.DOTALL)
-    if not match:
-        return {}, text
-    fm_text = match.group(1)
-    body = match.group(2)
-    return yaml.safe_load(fm_text) or {}, body
+    """Parse YAML frontmatter from markdown text. Delegates to shared util."""
+    return parse_frontmatter(text)
 
 
 def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) -> None:
@@ -315,10 +309,5 @@ def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) ->
 
 
 def _slugify(text: str) -> str:
-    """Convert a title to a slug (lowercase, hyphens)."""
-    import unicodedata
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    text = re.sub(r"[-\s]+", "-", text).strip("-")
-    return text
+    """Convert a title to a slug (lowercase, hyphens). Delegates to shared util."""
+    return slugify(text)

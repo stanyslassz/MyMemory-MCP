@@ -51,12 +51,6 @@ class ScoringConfig:
     relation_strength_growth: float = 0.05
     window_size: int = 50
     min_score_for_context: float = 0.3
-    # Legacy fields (used until Phase 2 replaces scoring.py)
-    weight_importance: float = 0.4
-    weight_frequency: float = 0.3
-    weight_recency: float = 0.3
-    frequency_cap: int = 20
-    recency_halflife_days: int = 30
 
 
 @dataclass
@@ -210,11 +204,6 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             relation_strength_growth=scoring.get("relation_strength_growth", 0.05),
             window_size=scoring.get("window_size", 50),
             min_score_for_context=scoring.get("min_score_for_context", 0.3),
-            weight_importance=scoring.get("weight_importance", 0.4),
-            weight_frequency=scoring.get("weight_frequency", 0.3),
-            weight_recency=scoring.get("weight_recency", 0.3),
-            frequency_cap=scoring.get("frequency_cap", 20),
-            recency_halflife_days=scoring.get("recency_halflife_days", 30),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),

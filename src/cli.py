@@ -36,8 +36,19 @@ def cli(ctx, verbose, config_path):
 @cli.command()
 @click.pass_context
 def run(ctx):
-    """Process all pending chats → extraction → enrichment → context → FAISS."""
-    config = ctx.obj["config"]
+    """Process all pending chats → extraction → enrichment → consolidation → context → FAISS."""
+    _run_pipeline(ctx.obj["config"], consolidate=True)
+
+
+@cli.command("run-light")
+@click.pass_context
+def run_light(ctx):
+    """Lightweight run: same as 'run' but skips auto-consolidation (no LLM calls for merging)."""
+    _run_pipeline(ctx.obj["config"], consolidate=False)
+
+
+def _run_pipeline(config, *, consolidate: bool = True) -> None:
+    """Shared pipeline logic for run and run-light."""
     memory_path = config.memory_path
 
     from src.memory.store import (
@@ -142,12 +153,19 @@ def run(ctx):
         # Mark processed
         mark_chat_processed(chat_path, report.entities_updated, report.entities_created)
 
+    # Step 5b: Auto-consolidate entities with too many facts (skipped in run-light)
+    if consolidate:
+        try:
+            _auto_consolidate(memory_path, config)
+        except Exception as e:
+            console.print(f"  [yellow]Auto-consolidation warning: {e}[/yellow]")
+
     # Step 7: Generate context (deterministic template)
     try:
         console.print("\n[bold]Generating context...[/bold]")
         graph = load_graph(memory_path)
-        from src.memory.context import build_deterministic_context
-        context_text = build_deterministic_context(graph, memory_path, config)
+        from src.memory.context import build_context
+        context_text = build_context(graph, memory_path, config)
         if context_text.strip():
             write_context(memory_path, context_text)
             console.print("  [green]_context.md updated[/green]")
@@ -199,7 +217,7 @@ def rebuild_all(ctx):
     """Rebuild graph + context + FAISS."""
     config = ctx.obj["config"]
     from src.memory.graph import rebuild_from_md, save_graph
-    from src.memory.context import build_deterministic_context, write_context, write_index
+    from src.memory.context import build_context, write_context, write_index
     from src.memory.scoring import recalculate_all_scores
     from src.pipeline.indexer import build_index
 
@@ -229,7 +247,7 @@ def rebuild_all(ctx):
     console.print("  _index.md updated")
 
     # Context (deterministic template)
-    context_text = build_deterministic_context(graph, config.memory_path, config)
+    context_text = build_context(graph, config.memory_path, config)
     if context_text.strip():
         write_context(config.memory_path, context_text)
         console.print("  _context.md updated")
@@ -589,6 +607,35 @@ def _consolidate_facts(config, dry_run: bool, min_facts: int) -> None:
             console.print(f"  [red]Failed: {e}[/red]")
 
     console.print("\n[bold green]Fact consolidation complete.[/bold green]")
+
+
+def _auto_consolidate(memory_path, config, min_facts: int = 8) -> None:
+    """Auto-consolidate entities with too many facts (called during 'run')."""
+    from src.memory.graph import load_graph
+    from src.memory.store import read_entity, consolidate_entity_facts
+
+    graph = load_graph(memory_path)
+    consolidated_count = 0
+
+    for eid, entity in graph.entities.items():
+        entity_path = memory_path / entity.file
+        if not entity_path.exists():
+            continue
+        try:
+            _, sections = read_entity(entity_path)
+            facts = sections.get("Facts", [])
+            live_facts = [f for f in facts if "[superseded]" not in f]
+            if len(live_facts) >= min_facts:
+                console.print(f"  [cyan]Auto-consolidating {entity.title} ({len(live_facts)} facts)...[/cyan]")
+                result = consolidate_entity_facts(entity_path, config)
+                if result["changes"]:
+                    console.print(f"    [green]{', '.join(result['changes'])}[/green]")
+                    consolidated_count += 1
+        except Exception as e:
+            console.print(f"    [yellow]Consolidation skipped for {entity.title}: {e}[/yellow]")
+
+    if consolidated_count:
+        console.print(f"  [green]Consolidated {consolidated_count} entity/ies[/green]")
 
 
 def _make_faiss_fn(config, memory_path):

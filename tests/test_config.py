@@ -34,10 +34,8 @@ memory:
     identity: 10
     top_of_mind: 25
 scoring:
-  weight_importance: 0.4
-  weight_frequency: 0.3
-  weight_recency: 0.3
-  frequency_cap: 20
+  decay_factor: 0.5
+  importance_weight: 0.3
 categories:
   observations: [fact, preference]
   entity_types: [person, health]
@@ -53,7 +51,7 @@ prompts:
     assert config.user_language == "en"
     assert config.llm_extraction.model == "openai/gpt-4o-mini"
     assert config.llm_extraction.temperature == 0
-    assert config.scoring.weight_importance == 0.4
+    assert config.scoring.importance_weight == 0.3
     assert config.categories.observations == ["fact", "preference"]
     assert config.categories.folders["person"] == "close_ones"
     assert config.context_budget["identity"] == 10

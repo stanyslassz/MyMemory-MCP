@@ -109,7 +109,7 @@ def spreading_activation(
     First pass: compute base ACT-R scores (sigmoid of B + beta) for all entities.
     Compute effective relation strengths with time decay.
     Build bidirectional adjacency list.
-    Second pass: S_i = sum(w_ij * A_j) where w_ij = effective_strength / total_outgoing.
+    Second pass: S_i = sum(w_ij * A_j) where w_ij = effective_strength.
     Returns dict of entity_id -> spreading_bonus.
     """
     if today is None:
