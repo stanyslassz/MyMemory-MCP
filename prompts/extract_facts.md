@@ -24,6 +24,14 @@ Rules:
 - Also extract interaction style observations: how the user likes to be responded to,
   what formats they prefer, what annoys them. Store these as entity "AI Personality"
   with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
+- Information about the user themselves (their job, health, skills, preferences) should
+  be attached to specialized entities (type "health" for medical, "work" for job, etc.).
+  Do NOT create entities of type "person" for the user — only for other people.
+  For example, if the user says "I work at Airbus as a developer", create a "work" entity,
+  not a "person" entity for the user.
+- Medical positions, exercises, or techniques (e.g. "position fœtus", "pont du bassin")
+  are observations within the relevant health entity, NOT separate "project" entities.
+- Each observation content should be concise: max ~120 characters.
 - Respond ONLY with valid JSON. No text before or after.
 
 # USER

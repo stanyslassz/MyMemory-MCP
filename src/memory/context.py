@@ -362,6 +362,198 @@ def build_context(
 build_deterministic_context = build_context
 
 
+def _rag_prefetch(
+    entity_ids: list[str],
+    graph: GraphData,
+    config: Config,
+    memory_path: Path,
+    max_results_per_entity: int = 2,
+) -> str:
+    """Pre-fetch related facts from FAISS for a list of entities.
+
+    Returns a text block with related memories to inject in the LLM prompt.
+    Gracefully returns empty string if FAISS is unavailable.
+    """
+    try:
+        from src.pipeline.indexer import search as faiss_search
+    except ImportError:
+        return ""
+
+    seen_chunks: set[str] = set()
+    rag_lines: list[str] = []
+
+    for eid in entity_ids:
+        entity = graph.entities.get(eid)
+        if not entity:
+            continue
+        try:
+            results = faiss_search(entity.title, config, memory_path, top_k=max_results_per_entity)
+            for r in results:
+                # Skip self-references and duplicates
+                if r.entity_id in entity_ids or r.chunk in seen_chunks:
+                    continue
+                seen_chunks.add(r.chunk)
+                related_entity = graph.entities.get(r.entity_id)
+                title = related_entity.title if related_entity else r.entity_id
+                rag_lines.append(f"- [{title}] {r.chunk[:200]}")
+        except Exception:
+            continue
+
+    return "\n".join(rag_lines[:15])  # Cap at 15 RAG results total
+
+
+def build_context_with_llm(
+    graph: GraphData, memory_path: Path, config: Config,
+) -> str:
+    """Build _context.md using per-section LLM cleanup with RAG pre-fetch.
+
+    Each section is processed independently by the LLM for better quality
+    with small models. Falls back to deterministic if LLM calls fail.
+    """
+    import logging
+    from src.core.llm import call_context_section
+
+    logger = logging.getLogger(__name__)
+    today = date.today()
+    today_str = today.isoformat()
+
+    # Load template
+    template_path = config.prompts_path / "context_template.md"
+    if template_path.exists():
+        template = template_path.read_text(encoding="utf-8")
+    else:
+        template = "# Personal Memory — {date}\n\n{sections}\n\n{available_entities}\n{custom_instructions}"
+
+    # Load custom instructions
+    instructions_path = config.prompts_path / "context_instructions.md"
+    custom_instructions = ""
+    if instructions_path.exists():
+        custom_instructions = instructions_path.read_text(encoding="utf-8")
+
+    # Budget calculation
+    reserved = 500
+    total_budget = max(config.context_max_tokens - reserved, 1000)
+    budget = config.context_budget or {}
+
+    def section_budget(key: str) -> int:
+        pct = budget.get(key, 10)
+        return int(total_budget * pct / 100)
+
+    # Get all scored entities above threshold
+    min_score = config.scoring.min_score_for_context
+    all_top = get_top_entities(graph, n=50, include_permanent=True, min_score=min_score)
+    shown_ids: set[str] = set()
+
+    # Group entities by section type
+    ai_entities = [(eid, e) for eid, e in all_top if e.type == "ai_self"]
+    identity_entities = [(eid, e) for eid, e in all_top if e.file.startswith("self/") and e.type != "ai_self"]
+    work_entities = [(eid, e) for eid, e in all_top if e.type in ("work", "organization")]
+    personal_entities = [(eid, e) for eid, e in all_top if e.type in ("person", "animal", "place")]
+    # Remove already-assigned from personal
+    assigned = {eid for eid, _ in ai_entities + identity_entities + work_entities}
+    personal_entities = [(eid, e) for eid, e in personal_entities if eid not in assigned]
+
+    # Helper: build dossier + call LLM for a section
+    def _llm_section(name: str, entities: list[tuple[str, GraphEntity]], budget_key: str) -> str:
+        if not entities:
+            return ""
+        eids = [eid for eid, _ in entities]
+        # Build raw dossier
+        dossier_parts = []
+        for eid, entity in entities:
+            dossier_parts.append(_enrich_entity(eid, entity, graph, memory_path))
+            shown_ids.add(eid)
+        raw_dossier = "\n\n".join(dossier_parts)
+
+        # RAG pre-fetch
+        rag_text = _rag_prefetch(eids, graph, config, memory_path)
+
+        # LLM call
+        try:
+            result = call_context_section(
+                section_name=name,
+                entities_dossier=raw_dossier,
+                rag_context=rag_text,
+                budget_tokens=section_budget(budget_key),
+                config=config,
+            )
+            if result.strip():
+                return result
+        except Exception as e:
+            logger.warning("LLM section '%s' failed, using deterministic: %s", name, e)
+
+        # Fallback: return raw dossier
+        return raw_dossier
+
+    # Generate each section with LLM
+    ai_personality = _llm_section("AI Personality & Interaction Style", ai_entities, "ai_personality")
+    if not ai_personality:
+        ai_personality = "No personality data yet."
+
+    identity_text = _llm_section("Identity (health, self)", identity_entities, "identity")
+    work_text = _llm_section("Work Context", work_entities, "work")
+    personal_text = _llm_section("Personal Context (people, places, animals)", personal_entities, "personal")
+
+    # Top of mind (everything remaining)
+    top_entities = [(eid, e) for eid, e in all_top if eid not in shown_ids]
+    top_entities.sort(key=lambda x: x[1].score, reverse=True)
+    top_text = _llm_section("Top of Mind (current priorities)", top_entities[:10], "top_of_mind")
+    for eid, _ in top_entities[:10]:
+        shown_ids.add(eid)
+
+    # Vigilances — deterministic (no LLM needed for safety-critical data)
+    vigilance_parts = []
+    for eid, entity in all_top:
+        if eid in shown_ids and entity.type != "ai_self":
+            entity_path = (memory_path / entity.file).resolve()
+            if entity_path.exists() and entity_path.is_relative_to(memory_path.resolve()):
+                try:
+                    _, sections = read_entity(entity_path)
+                    facts = sections.get("Facts", [])
+                    vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
+                    for vf in vig_facts[:2]:
+                        obs = _parse_observation(vf)
+                        content = obs["content"] if obs else vf
+                        vigilance_parts.append(f"- {entity.title}: {content}")
+                except Exception:
+                    pass
+    vigilance_text = "\n".join(vigilance_parts)
+
+    # Assemble sections
+    sections_parts = []
+    if identity_text:
+        sections_parts.append(f"## Identity\n\n{identity_text}")
+    if work_text:
+        sections_parts.append(f"## Work context\n\n{work_text}")
+    if personal_text:
+        sections_parts.append(f"## Personal context\n\n{personal_text}")
+    if top_text:
+        sections_parts.append(f"## Top of mind\n\n{top_text}")
+    if vigilance_text:
+        sections_parts.append(f"## Vigilances\n\n{vigilance_text}")
+    sections_text = "\n\n".join(sections_parts)
+
+    # Available entities
+    all_entity_ids = set(graph.entities.keys())
+    remaining = all_entity_ids - shown_ids
+    remaining_sorted = sorted(
+        [(eid, graph.entities[eid]) for eid in remaining],
+        key=lambda x: x[1].score, reverse=True,
+    )[:30]
+    available_text = " | ".join(f"{e.title} ({e.type})" for _, e in remaining_sorted) if remaining_sorted else ""
+
+    # Assemble template
+    result = template
+    result = result.replace("{date}", today_str)
+    result = result.replace("{user_language_name}", config.user_language_name)
+    result = result.replace("{ai_personality}", ai_personality)
+    result = result.replace("{sections}", sections_text)
+    result = result.replace("{available_entities}", available_text)
+    result = result.replace("{custom_instructions}", custom_instructions)
+
+    return result
+
+
 def build_context_input(graph: GraphData, memory_path: Path, config: Config) -> str:
     """Build enriched dossier for LLM narrative mode input."""
     top = get_top_entities(

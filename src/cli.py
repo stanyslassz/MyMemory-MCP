@@ -160,12 +160,18 @@ def _run_pipeline(config, *, consolidate: bool = True) -> None:
         except Exception as e:
             console.print(f"  [yellow]Auto-consolidation warning: {e}[/yellow]")
 
-    # Step 7: Generate context (deterministic template)
+    # Step 7: Generate context
     try:
-        console.print("\n[bold]Generating context...[/bold]")
         graph = load_graph(memory_path)
-        from src.memory.context import build_context
-        context_text = build_context(graph, memory_path, config)
+        use_llm = consolidate and getattr(config, "context_llm_sections", False)
+        if use_llm:
+            console.print("\n[bold]Generating context (LLM per-section)...[/bold]")
+            from src.memory.context import build_context_with_llm
+            context_text = build_context_with_llm(graph, memory_path, config)
+        else:
+            console.print("\n[bold]Generating context (deterministic)...[/bold]")
+            from src.memory.context import build_context
+            context_text = build_context(graph, memory_path, config)
         if context_text.strip():
             write_context(memory_path, context_text)
             console.print("  [green]_context.md updated[/green]")

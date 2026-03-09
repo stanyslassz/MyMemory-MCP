@@ -5,10 +5,13 @@ about a single entity and must merge semantically redundant ones while preservin
 all distinct information.
 
 Rules:
-- Merge observations that say essentially the same thing into a single, richer line.
+- Merge observations that say essentially the same thing into ONE short line.
+- Each consolidated observation must be MAX 120 characters. If the merge would be
+  longer, keep only the most important/recent version instead of combining everything.
+- Do NOT concatenate multiple facts with parentheses — write one clean sentence.
 - Preserve the most recent date when merging.
 - Preserve the strongest valence (positive > neutral > negative for "good" facts, etc.).
-- Keep all unique tags across merged observations.
+- Keep all unique tags across merged observations (max 3 tags per fact).
 - DO NOT invent new information — only combine what exists.
 - If two observations are clearly distinct (different facts), keep both unchanged.
 - For each consolidated observation, list the indices of the original observations
