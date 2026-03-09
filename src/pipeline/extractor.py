@@ -7,14 +7,10 @@ import logging
 from src.core.config import Config
 from src.core.llm import call_extraction
 from src.core.models import RawExtraction, RawEntity
+from src.core.utils import estimate_tokens as _estimate_tokens
 from src.pipeline.resolver import slugify
 
 logger = logging.getLogger(__name__)
-
-
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: words * 1.3."""
-    return int(len(text.split()) * 1.3)
 
 
 def _merge_extractions(extractions: list[RawExtraction]) -> RawExtraction:

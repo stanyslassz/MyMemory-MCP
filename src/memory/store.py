@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from src.core.models import EntityFrontmatter
+from src.core.utils import parse_frontmatter as _shared_parse_frontmatter
 
 
 def init_memory_structure(memory_path: Path) -> None:
@@ -343,14 +344,8 @@ def get_chat_content(filepath: Path) -> str:
 # ── Private helpers ──────────────────────────────────────────
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from a markdown file. Returns (fm_dict, body)."""
-    match = re.match(r"^---\n(.*?\n)---\n(.*)", text, re.DOTALL)
-    if not match:
-        return {}, text
-    fm_text = match.group(1)
-    body = match.group(2)
-    fm_data = yaml.safe_load(fm_text) or {}
-    return fm_data, body
+    """Parse YAML frontmatter from a markdown file. Delegates to shared util."""
+    return _shared_parse_frontmatter(text)
 
 
 def _parse_sections(body: str) -> dict[str, list[str]]:

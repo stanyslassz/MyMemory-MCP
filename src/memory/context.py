@@ -8,6 +8,7 @@ from pathlib import Path
 from src.core.config import Config
 from src.core.llm import call_context_generation
 from src.core.models import GraphData, GraphEntity
+from src.core.utils import estimate_tokens as _estimate_tokens_util
 from src.memory.graph import get_related
 from src.memory.scoring import get_top_entities
 from src.memory.store import read_entity, _parse_observation
@@ -97,9 +98,38 @@ def _deduplicate_facts_for_context(
     return result
 
 
+def _group_facts_by_category(facts: list[str]) -> dict[str, list[str]]:
+    """Group fact lines by their [category] prefix, stripping the prefix from content.
+
+    Returns an ordered dict of category -> list of content strings (without category prefix).
+    Non-parseable lines go under '_other'.
+    """
+    from collections import OrderedDict
+    grouped: dict[str, list[str]] = OrderedDict()
+    for line in facts:
+        obs = _parse_observation(line)
+        if obs:
+            cat = obs["category"]
+            # Rebuild display content: (date) content [valence] #tags
+            parts = []
+            if obs.get("date"):
+                parts.append(f"({obs['date']})")
+            parts.append(obs["content"])
+            if obs.get("valence"):
+                markers = {"positive": "[+]", "negative": "[-]", "neutral": "[~]"}
+                if obs["valence"] in markers:
+                    parts.append(markers[obs["valence"]])
+            for tag in obs.get("tags", []):
+                parts.append(f"#{tag}")
+            grouped.setdefault(cat, []).append(" ".join(parts))
+        else:
+            grouped.setdefault("_other", []).append(line.lstrip("- "))
+    return grouped
+
+
 def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: words * 1.3."""
-    return int(len(text.split()) * 1.3)
+    """Rough token estimate: words * 1.3. Delegates to shared util."""
+    return _estimate_tokens_util(text)
 
 
 def _enrich_entity(
@@ -136,11 +166,17 @@ def _enrich_entity(
     if facts:
         section_lines.append("Facts:")
         # Filter superseded facts, sort by date, deduplicate for context
+        is_ai_self = entity.type == "ai_self"
+        max_cat = 3 if is_ai_self else 5
         facts = [f for f in facts if "[superseded]" not in f]
         sorted_facts = _sort_facts_by_date(facts)
-        sorted_facts = _deduplicate_facts_for_context(sorted_facts)
-        for fact in sorted_facts:
-            section_lines.append(f"  {fact}")
+        sorted_facts = _deduplicate_facts_for_context(sorted_facts, max_per_category=max_cat)
+        # Group by category for cleaner output
+        grouped = _group_facts_by_category(sorted_facts)
+        for cat, cat_facts in grouped.items():
+            section_lines.append(f"  [{cat}]")
+            for content in cat_facts:
+                section_lines.append(f"    - {content}")
     if related_info:
         section_lines.append(f"Related: {', '.join(related_info)}")
 
@@ -249,7 +285,7 @@ def build_context(
     for eid, _ in top_entities[:10]:
         shown_ids.add(eid)
 
-    # Vigilances (scan shown entities for vigilance/diagnosis facts)
+    # Vigilances (compact quick-reference: entity + key content, max 2 per entity)
     vigilance_parts = []
     for eid, entity in all_top:
         if eid in shown_ids and entity.type != "ai_self":
@@ -259,8 +295,10 @@ def build_context(
                     _, sections = read_entity(entity_path)
                     facts = sections.get("Facts", [])
                     vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
-                    for vf in vig_facts:
-                        vigilance_parts.append(f"- {entity.title}: {vf}")
+                    for vf in vig_facts[:2]:  # Max 2 per entity to reduce duplication
+                        obs = _parse_observation(vf)
+                        content = obs["content"] if obs else vf
+                        vigilance_parts.append(f"- {entity.title}: {content}")
                 except Exception:
                     pass
     vigilance_text = "\n".join(vigilance_parts)
@@ -320,11 +358,8 @@ def build_context(
     return result
 
 
-def build_deterministic_context(
-    graph: GraphData, memory_path: Path, config: Config,
-) -> str:
-    """Legacy: delegate to build_context."""
-    return build_context(graph, memory_path, config)
+# Deprecated alias — use build_context() directly
+build_deterministic_context = build_context
 
 
 def build_context_input(graph: GraphData, memory_path: Path, config: Config) -> str:

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from src.core.config import Config, ScoringConfig
 from src.core.models import EntityFrontmatter, GraphData, GraphEntity, GraphRelation
-from src.memory.context import build_context, build_context_input, build_deterministic_context, generate_index, write_index
+from src.memory.context import build_context, build_context_input, generate_index, write_index
 from src.memory.store import write_entity
 
 
@@ -115,7 +115,7 @@ def test_deterministic_context_has_all_sections(tmp_path):
 
     config = _make_config(tmp_path)
 
-    result = build_deterministic_context(graph, tmp_path, config)
+    result = build_context(graph, tmp_path, config)
     # Template-based structure
     assert "Personal Memory" in result
     assert "## Identity" in result
@@ -157,7 +157,7 @@ def test_deterministic_context_categorization(tmp_path):
                  {"Facts": [], "Relations": [], "History": []})
 
     config = _make_config(tmp_path)
-    result = build_deterministic_context(graph, tmp_path, config)
+    result = build_context(graph, tmp_path, config)
 
     # Identity section should contain "Me" entity
     assert "## Identity" in result
@@ -186,7 +186,7 @@ def test_deterministic_context_vigilance(tmp_path):
                   "Relations": [], "History": []})
 
     config = _make_config(tmp_path)
-    result = build_deterministic_context(graph, tmp_path, config)
+    result = build_context(graph, tmp_path, config)
     assert "Chronic sciatica" in result
     assert "## Vigilances" in result
 
@@ -218,7 +218,7 @@ def test_build_context_uses_template(tmp_path):
 
 
 def test_facts_sorted_by_date_in_context(tmp_path):
-    """Facts should be sorted chronologically in context output."""
+    """Facts should be sorted chronologically within same category in context output."""
     (tmp_path / "self").mkdir()
 
     graph = GraphData(generated="2026-03-05")
@@ -231,7 +231,7 @@ def test_facts_sorted_by_date_in_context(tmp_path):
     write_entity(tmp_path / "self" / "health-ent.md", fm,
                  {"Facts": [
                      "- [fact] Undated fact",
-                     "- [diagnosis] (2025-11) Later diagnosis [-]",
+                     "- [fact] (2025-11) Later fact [-]",
                      "- [fact] (2024-03) Earlier fact [+]",
                  ],
                   "Relations": [], "History": []})
@@ -239,9 +239,9 @@ def test_facts_sorted_by_date_in_context(tmp_path):
     config = _make_config(tmp_path)
     result = build_context(graph, tmp_path, config)
 
-    # Dated facts should appear chronologically (2024 before 2025), undated last
+    # Within same category, dated facts should appear chronologically, undated last
     idx_earlier = result.find("Earlier fact")
-    idx_later = result.find("Later diagnosis")
+    idx_later = result.find("Later fact")
     idx_undated = result.find("Undated fact")
     assert idx_earlier < idx_later < idx_undated
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Callable, Optional
 
 from src.core.models import (
@@ -13,15 +11,7 @@ from src.core.models import (
     ResolvedEntity,
     ResolvedExtraction,
 )
-
-
-def slugify(text: str) -> str:
-    """Convert a title to a slug (lowercase, hyphens, ASCII)."""
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    text = re.sub(r"[-\s]+", "-", text).strip("-")
-    return text
+from src.core.utils import slugify
 
 
 def resolve_entity(
