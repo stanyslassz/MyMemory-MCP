@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections import defaultdict
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -10,6 +12,8 @@ from src.core.config import load_config
 from src.memory.graph import load_graph, save_graph
 from src.memory.store import save_chat as store_save_chat
 from src.pipeline.indexer import search as faiss_search
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("memory-ai")
 
@@ -52,8 +56,20 @@ def save_chat(messages: list[dict]) -> dict:
         messages: List of message dicts with 'role' and 'content' keys.
 
     Returns:
-        Status dict with 'status' and 'file' keys.
+        Status dict with 'status' and 'file' keys, or error dict.
     """
+    # Validate messages
+    if not isinstance(messages, list) or len(messages) == 0:
+        return {"status": "error", "message": "messages must be a non-empty list"}
+
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            return {"status": "error", "message": f"message at index {i} must be a dict"}
+        if "role" not in msg or not isinstance(msg.get("role"), str):
+            return {"status": "error", "message": f"message at index {i} missing valid 'role' (str)"}
+        if "content" not in msg or not isinstance(msg.get("content"), str):
+            return {"status": "error", "message": f"message at index {i} missing valid 'content' (str)"}
+
     config = _get_config()
     filepath = store_save_chat(messages, config.memory_path)
     rel_path = filepath.relative_to(config.memory_path)
@@ -73,11 +89,30 @@ def search_rag(query: str) -> dict:
     config = _get_config()
     memory_path = config.memory_path
 
-    # FAISS search
-    results = faiss_search(query, config, memory_path)
+    # FAISS search — graceful fallback if index doesn't exist
+    try:
+        results = faiss_search(query, config, memory_path)
+    except Exception:
+        logger.warning("FAISS search failed for query %r, returning empty results", query, exc_info=True)
+        return {"query": query, "results": [], "total": 0}
 
-    # Enrich with graph relations
-    graph = load_graph(memory_path)
+    # Enrich with graph relations — graceful fallback if graph fails
+    try:
+        graph = load_graph(memory_path)
+    except Exception:
+        logger.warning("Failed to load graph, returning results without enrichment", exc_info=True)
+        enriched_results = [
+            {
+                "entity_id": r.entity_id,
+                "file": r.file,
+                "score": r.score,
+                "title": r.entity_id,
+                "type": "unknown",
+                "relations": [],
+            }
+            for r in results
+        ]
+        return {"query": query, "results": enriched_results, "total": len(enriched_results)}
 
     # Re-rank: combined FAISS similarity + graph score
     for result in results:
@@ -86,14 +121,20 @@ def search_rag(query: str) -> dict:
         result.score = result.score * 0.6 + graph_score * 0.4
     results.sort(key=lambda r: r.score, reverse=True)
 
+    # Build adjacency dict once for O(1) per-entity relation lookup
+    adjacency = defaultdict(list)
+    for rel in graph.relations:
+        adjacency[rel.from_entity].append(("outgoing", rel))
+        adjacency[rel.to_entity].append(("incoming", rel))
+
     enriched_results = []
 
     for result in results:
         entity = graph.entities.get(result.entity_id)
         relations = []
         if entity:
-            for rel in graph.relations:
-                if rel.from_entity == result.entity_id:
+            for direction, rel in adjacency.get(result.entity_id, []):
+                if direction == "outgoing":
                     target = graph.entities.get(rel.to_entity)
                     if target:
                         relations.append({
@@ -101,7 +142,7 @@ def search_rag(query: str) -> dict:
                             "target": target.title,
                             "target_id": rel.to_entity,
                         })
-                elif rel.to_entity == result.entity_id:
+                else:
                     source = graph.entities.get(rel.from_entity)
                     if source:
                         relations.append({

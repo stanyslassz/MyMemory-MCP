@@ -88,7 +88,7 @@ def test_extraction_retries_increment(tmp_path):
 
 def test_is_timeout_error_detection():
     """Various timeout-like exceptions are detected."""
-    from src.cli import _is_timeout_error
+    from src.pipeline.orchestrator import is_timeout_error as _is_timeout_error
 
     assert _is_timeout_error(TimeoutError("connection timed out"))
     assert _is_timeout_error(Exception("ReadTimeout: server did not respond"))

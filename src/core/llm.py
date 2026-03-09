@@ -339,3 +339,32 @@ def call_entity_summary(
     response = litellm.completion(**kwargs)
     text = response.choices[0].message.content or ""
     return strip_thinking(text).strip()
+
+
+class RelationProposal(BaseModel):
+    action: str  # "relate" or "none"
+    relation_type: str | None = None
+    context: str = ""
+
+
+def call_relation_discovery(
+    entity_a_title: str,
+    entity_a_type: str,
+    entity_a_dossier: str,
+    entity_b_title: str,
+    entity_b_type: str,
+    entity_b_dossier: str,
+    config: Config,
+) -> RelationProposal:
+    """Discover if a relation exists between two entities. Returns proposal."""
+    prompt = load_prompt(
+        "discover_relations",
+        config,
+        entity_a_title=entity_a_title,
+        entity_a_type=entity_a_type,
+        entity_a_dossier=entity_a_dossier,
+        entity_b_title=entity_b_title,
+        entity_b_type=entity_b_type,
+        entity_b_dossier=entity_b_dossier,
+    )
+    return _call_structured(config.llm_dream_effective, prompt, RelationProposal)

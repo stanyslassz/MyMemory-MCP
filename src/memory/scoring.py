@@ -165,7 +165,7 @@ def spreading_activation(
             if neighbor_id in base_scores:
                 bonus += eff * base_scores[neighbor_id]
 
-        spreading[eid] = bonus
+        spreading[eid] = bonus / total_strength
 
     return spreading
 

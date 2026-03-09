@@ -30,22 +30,3 @@ def arbitrate_entity(
         return EntityResolution(action="new", new_type=None)
 
     return call_arbitration(name, context, candidates_data, config)
-
-
-def arbitrate_all(
-    ambiguous_list: list[dict],
-    graph: GraphData,
-    config: Config,
-) -> list[EntityResolution]:
-    """Arbitrate all ambiguous entities. Each dict has 'name', 'context', 'candidates'."""
-    results = []
-    for item in ambiguous_list:
-        result = arbitrate_entity(
-            item["name"],
-            item.get("context", ""),
-            item["candidates"],
-            graph,
-            config,
-        )
-        results.append(result)
-    return results

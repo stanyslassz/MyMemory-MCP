@@ -48,17 +48,17 @@ class TestStallDetection:
         assert issubclass(StallError, TimeoutError)
 
     def test_is_timeout_recognizes_stall_error(self):
-        from src.cli import _is_timeout_error
+        from src.pipeline.orchestrator import is_timeout_error as _is_timeout_error
         from src.core.llm import StallError
         assert _is_timeout_error(StallError("stalled"))
 
     def test_is_timeout_recognizes_standard_timeout(self):
-        from src.cli import _is_timeout_error
+        from src.pipeline.orchestrator import is_timeout_error as _is_timeout_error
         assert _is_timeout_error(TimeoutError("connection timed out"))
         assert _is_timeout_error(Exception("ReadTimeout"))
 
     def test_is_timeout_rejects_unrelated(self):
-        from src.cli import _is_timeout_error
+        from src.pipeline.orchestrator import is_timeout_error as _is_timeout_error
         assert not _is_timeout_error(ValueError("bad value"))
 
 

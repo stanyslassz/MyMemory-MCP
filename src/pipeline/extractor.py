@@ -13,7 +13,7 @@ from src.core.models import (
     RelationType, EntityType, ObservationCategory,
 )
 from src.core.utils import estimate_tokens as _estimate_tokens
-from src.pipeline.resolver import slugify
+from src.core.utils import slugify
 
 logger = logging.getLogger(__name__)
 

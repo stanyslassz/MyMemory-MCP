@@ -358,10 +358,6 @@ def build_context(
     return result
 
 
-# Deprecated alias — use build_context() directly
-build_deterministic_context = build_context
-
-
 def _rag_prefetch(
     entity_ids: list[str],
     graph: GraphData,

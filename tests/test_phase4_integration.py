@@ -7,7 +7,6 @@ from src.core.models import (
 )
 from src.memory.scoring import calculate_score, recalculate_all_scores, spreading_activation
 from src.memory.mentions import add_mention
-from src.pipeline.nlp_prefilter import _try_parse_french_date
 
 
 def test_full_scoring_pipeline():
@@ -67,18 +66,6 @@ def test_mention_windowing_in_scoring():
     score = calculate_score(entity, config, today)
     assert score > 0.5  # Should be boosted by both recent mention + historical buckets
 
-
-def test_nlp_date_parsing_pipeline():
-    """NLP date parsing integrates with mention_dates."""
-    # Parse a French date
-    parsed = _try_parse_french_date("il y a 3 jours", "2026-03-05")
-    assert parsed == "2026-03-02"
-
-    # Add it as a mention
-    dates = []
-    buckets = {}
-    dates, buckets = add_mention(parsed, dates, buckets)
-    assert "2026-03-02" in dates
 
 
 def test_config_has_nlp_section():

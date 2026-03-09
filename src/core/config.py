@@ -97,6 +97,7 @@ class Config:
     llm_arbitration: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
     llm_context: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b", temperature=0.3))
     llm_consolidation: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b", temperature=0.1))
+    llm_dream: LLMStepConfig | None = None  # Optional — falls back to llm_context
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     memory_path: Path = field(default_factory=lambda: Path("./memory"))
     context_max_tokens: int = 3000
@@ -123,6 +124,11 @@ class Config:
         """Map language code to full name for prompts."""
         names = {"fr": "French", "en": "English", "es": "Spanish", "de": "German", "it": "Italian", "pt": "Portuguese"}
         return names.get(self.user_language, self.user_language)
+
+    @property
+    def llm_dream_effective(self) -> LLMStepConfig:
+        """Dream LLM config: uses llm_dream if set, otherwise falls back to llm_context."""
+        return self.llm_dream if self.llm_dream is not None else self.llm_context
 
     def get_folder_for_type(self, entity_type: str) -> str:
         """Return the memory subfolder for an entity type."""
@@ -182,6 +188,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         llm_arbitration=_build_llm_step(llm.get("arbitration", {})),
         llm_context=_build_llm_step(llm.get("context", {})),
         llm_consolidation=_build_llm_step(llm.get("consolidation", {})),
+        llm_dream=_build_llm_step(llm["dream"]) if "dream" in llm else None,
         embeddings=EmbeddingsConfig(
             provider=emb.get("provider", "sentence-transformers"),
             model=emb.get("model", "all-MiniLM-L6-v2"),
