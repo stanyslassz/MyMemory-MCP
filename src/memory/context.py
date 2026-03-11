@@ -9,7 +9,6 @@ from src.core.config import Config
 from src.core.llm import call_context_generation
 from src.core.models import GraphData, GraphEntity
 from src.core.utils import estimate_tokens as _estimate_tokens_util
-from src.memory.graph import get_related
 from src.memory.scoring import get_top_entities
 from src.memory.store import read_entity, _parse_observation
 
@@ -199,14 +198,6 @@ def _enrich_entity(
         except Exception:
             pass
 
-    # Get related entities (BFS depth 1)
-    related_ids = get_related(graph, entity_id, depth=1)
-    related_info = []
-    for rel_id in related_ids:
-        if rel_id in graph.entities:
-            rel_entity = graph.entities[rel_id]
-            related_info.append(f"{rel_entity.title} ({rel_entity.type})")
-
     # Build section
     section_lines = [
         f"### {entity.title} [{entity.type}] (score: {entity.score:.2f}, retention: {entity.retention})",
@@ -227,20 +218,37 @@ def _enrich_entity(
             section_lines.append(f"  [{cat}]")
             for content in cat_facts:
                 section_lines.append(f"    - {content}")
-    if related_info:
-        section_lines.append(f"Related: {', '.join(related_info)}")
 
-    # Get relations for this entity from graph
+    # Get relations for this entity from graph (filter weak/stale)
+    today = date.today()
+    min_rel_strength = 0.3
+    max_rel_age_days = 365
     entity_relations = []
+    related_info = []
     for rel in graph.relations:
+        # Skip weak relations
+        if rel.strength < min_rel_strength:
+            continue
+        # Skip stale relations (not reinforced in over a year)
+        if rel.last_reinforced:
+            try:
+                last = date.fromisoformat(str(rel.last_reinforced))
+                if (today - last).days > max_rel_age_days:
+                    continue
+            except (ValueError, TypeError):
+                pass
         if rel.from_entity == entity_id:
             target = graph.entities.get(rel.to_entity)
             if target:
                 entity_relations.append(f"  → {rel.type} {target.title}")
+                related_info.append(f"{target.title} ({target.type})")
         elif rel.to_entity == entity_id:
             source = graph.entities.get(rel.from_entity)
             if source:
                 entity_relations.append(f"  ← {rel.type} {source.title}")
+                related_info.append(f"{source.title} ({source.type})")
+    if related_info:
+        section_lines.append(f"Related: {', '.join(related_info)}")
     if entity_relations:
         section_lines.append("Relations:")
         section_lines.extend(entity_relations)

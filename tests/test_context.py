@@ -246,6 +246,94 @@ def test_facts_sorted_by_date_in_context(tmp_path):
     assert idx_earlier < idx_later < idx_undated
 
 
+def test_context_filters_weak_relations():
+    """Context builder should exclude relations with strength below threshold."""
+    from datetime import date
+
+    relations = [
+        GraphRelation(from_entity="alice", to_entity="bob", type="friend_of", strength=0.8, last_reinforced="2026-01-01"),
+        GraphRelation(from_entity="alice", to_entity="carol", type="linked_to", strength=0.1, last_reinforced="2026-01-01"),  # Weak
+        GraphRelation(from_entity="alice", to_entity="dave", type="affects", strength=0.5, last_reinforced="2024-01-01"),  # Stale (>1 year)
+    ]
+
+    min_strength = 0.3
+    max_age_days = 365
+    today = date(2026, 3, 11)
+
+    filtered = []
+    for r in relations:
+        if r.strength < min_strength:
+            continue
+        if r.last_reinforced:
+            try:
+                last = date.fromisoformat(r.last_reinforced)
+                if (today - last).days > max_age_days:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        filtered.append(r)
+
+    assert len(filtered) == 1  # Only bob's strong, recent relation
+    assert filtered[0].to_entity == "bob"
+
+
+def test_context_enrich_entity_excludes_weak_relations(tmp_path):
+    """_enrich_entity should not include weak or stale relations in output."""
+    from unittest.mock import patch
+    from datetime import date
+
+    (tmp_path / "self").mkdir()
+
+    # Create entity file
+    fm = EntityFrontmatter(title="Alice", type="person", score=0.8, importance=0.7)
+    write_entity(tmp_path / "self" / "alice.md", fm,
+                 {"Facts": ["- [fact] Some fact"], "Relations": [], "History": []})
+
+    graph = GraphData(generated="2026-03-11")
+    graph.entities["alice"] = GraphEntity(
+        file="self/alice.md", type="person", title="Alice",
+        score=0.8, importance=0.7,
+    )
+    graph.entities["bob"] = GraphEntity(
+        file="self/bob.md", type="person", title="Bob",
+        score=0.5, importance=0.5,
+    )
+    graph.entities["carol"] = GraphEntity(
+        file="self/carol.md", type="person", title="Carol",
+        score=0.5, importance=0.5,
+    )
+    graph.entities["dave"] = GraphEntity(
+        file="self/dave.md", type="person", title="Dave",
+        score=0.5, importance=0.5,
+    )
+
+    # Strong recent relation
+    graph.relations.append(GraphRelation(
+        from_entity="alice", to_entity="bob", type="friend_of",
+        strength=0.8, last_reinforced="2026-01-01",
+    ))
+    # Weak relation (below 0.3 threshold)
+    graph.relations.append(GraphRelation(
+        from_entity="alice", to_entity="carol", type="linked_to",
+        strength=0.1, last_reinforced="2026-01-01",
+    ))
+    # Stale relation (over 1 year old)
+    graph.relations.append(GraphRelation(
+        from_entity="alice", to_entity="dave", type="affects",
+        strength=0.5, last_reinforced="2024-01-01",
+    ))
+
+    from src.memory.context import _enrich_entity
+    result = _enrich_entity("alice", graph.entities["alice"], graph, tmp_path)
+
+    # Bob's relation should be present (strong + recent)
+    assert "Bob" in result
+    # Carol's relation should be filtered (weak)
+    assert "Carol" not in result
+    # Dave's relation should be filtered (stale)
+    assert "Dave" not in result
+
+
 def test_write_index(tmp_path):
     graph = GraphData(generated="2026-03-03")
     graph.entities["test"] = GraphEntity(
