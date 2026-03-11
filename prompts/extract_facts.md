@@ -21,6 +21,17 @@ Rules:
   a brief description of the old fact being replaced. Example: if the user says
   "actually I'm going to La Rosière, not Toulouse", the new observation should have
   supersedes: "ski à Toulouse". Leave empty when there is no correction.
+
+### Relation corrections
+If the user corrects a relationship between entities (e.g., "Louise is not my wife, she's my daughter"):
+- Extract the NEW correct relation with proper type
+- Set `supersedes` field to the old relation in format "from_slug:to_slug:old_relation_type"
+  - Use slugified names (lowercase, hyphens): "Jean-Pierre" → "jean-pierre"
+- Example: user says "Louise est ma fille, pas ma femme"
+  → relation: {"from_name": "User", "to_name": "Louise", "type": "parent_of", "context": "correction", "supersedes": "user:louise:linked_to"}
+
+IMPORTANT: Only set `supersedes` when the user EXPLICITLY corrects a previous statement. Do not guess.
+
 - Also extract interaction style observations: how the user likes to be responded to,
   what formats they prefer, what annoys them. Store these as entity "AI Personality"
   with type "ai_self" and categories "ai_style", "user_reaction", or "interaction_rule".
@@ -68,7 +79,7 @@ Here is an example of the expected JSON format (do NOT copy this data — extrac
     }
   ],
   "relations": [
-    {"from_name": "Marie", "to_name": "Airbus", "type": "works_at", "context": "Current job"}
+    {"from_name": "Marie", "to_name": "Airbus", "type": "works_at", "context": "Current job", "supersedes": ""}
   ],
   "summary": "Discussion about Marie and her health"
 }
