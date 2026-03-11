@@ -484,6 +484,34 @@ def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
     return False
 
 
+def remove_relation_line(entity_path: Path, relation_type: str, target_title: str) -> bool:
+    """Remove a specific relation line from ## Relations section.
+
+    Looks for lines matching '- {relation_type} [[{target_title}]]'.
+    Returns True if a line was removed, False otherwise.
+    """
+    frontmatter, sections = read_entity(entity_path)
+    relations = sections.get("Relations", [])
+    if not relations:
+        return False
+
+    target_lower = target_title.lower()
+    new_relations = []
+    removed = False
+    for line in relations:
+        stripped = line.strip()
+        if (stripped.startswith(f"- {relation_type} [[")
+                and target_lower in stripped.lower()):
+            removed = True
+        else:
+            new_relations.append(line)
+
+    if removed:
+        sections["Relations"] = new_relations
+        write_entity(entity_path, frontmatter, sections)
+    return removed
+
+
 def mark_observation_superseded(
     existing_facts: list[str],
     category: str,

@@ -213,3 +213,61 @@ def test_duplicate_observation_skipped(tmp_path):
     update_entity(filepath, new_observations=[{"category": "fact", "content": "Existing fact", "tags": []}])
     _, sections = read_entity(filepath)
     assert len(sections["Facts"]) == 1  # Not duplicated
+
+
+def test_remove_relation_line(tmp_path):
+    """remove_relation_line() should remove a specific relation from MD file."""
+    from src.memory.store import remove_relation_line
+
+    fm = EntityFrontmatter(
+        title="Alice",
+        type="person",
+        retention="long_term",
+        score=0.5,
+        importance=0.5,
+        frequency=3,
+        last_mentioned="2026-03-10",
+        created="2026-01-01",
+        aliases=[],
+        tags=[],
+    )
+    filepath = tmp_path / "close_ones" / "alice.md"
+    write_entity(filepath, fm, {
+        "Facts": ["- [fact] Likes coffee"],
+        "Relations": ["- parent_of [[Bob]]", "- friend_of [[Carol]]"],
+        "History": ["- 2026-03-10: Created"],
+    })
+
+    result = remove_relation_line(filepath, "parent_of", "Bob")
+    assert result is True
+
+    text = filepath.read_text()
+    assert "parent_of [[Bob]]" not in text
+    assert "friend_of [[Carol]]" in text
+
+
+def test_remove_relation_line_not_found(tmp_path):
+    """remove_relation_line() returns False if relation not found."""
+    from src.memory.store import remove_relation_line
+
+    fm = EntityFrontmatter(
+        title="Alice",
+        type="person",
+        retention="long_term",
+        score=0.5,
+        importance=0.5,
+        frequency=3,
+        last_mentioned="2026-03-10",
+        created="2026-01-01",
+        aliases=[],
+        tags=[],
+    )
+    filepath = tmp_path / "close_ones" / "alice.md"
+    write_entity(filepath, fm, {
+        "Facts": [],
+        "Relations": ["- friend_of [[Carol]]"],
+        "History": [],
+    })
+
+    result = remove_relation_line(filepath, "parent_of", "Bob")
+    assert result is False
