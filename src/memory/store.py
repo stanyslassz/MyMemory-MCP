@@ -484,6 +484,32 @@ def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
     return False
 
 
+def remove_relation_line(filepath: Path, rel_type: str, target_title: str) -> bool:
+    """Remove a relation line from the ## Relations section of an entity MD file.
+
+    Looks for a line matching '- rel_type [[target_title]]' (case-insensitive target match).
+    Returns True if a line was removed, False otherwise.
+    """
+    frontmatter, sections = read_entity(filepath)
+    relations = sections.get("Relations", [])
+    original_len = len(relations)
+
+    target_lower = target_title.lower()
+    new_relations = []
+    for line in relations:
+        match = re.match(r"- (\w+) \[\[(.+?)\]\]", line.strip())
+        if match and match.group(1) == rel_type and match.group(2).lower() == target_lower:
+            continue  # Skip this line (remove it)
+        new_relations.append(line)
+
+    if len(new_relations) == original_len:
+        return False
+
+    sections["Relations"] = new_relations
+    write_entity(filepath, frontmatter, sections)
+    return True
+
+
 def mark_observation_superseded(
     existing_facts: list[str],
     category: str,
