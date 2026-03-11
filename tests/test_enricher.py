@@ -197,3 +197,82 @@ def test_create_new_entity_has_mention_dates(tmp_path):
     assert match
     fm = yaml.safe_load(match.group(1))
     assert fm["mention_dates"] == ["2026-03-06"]
+
+
+def test_relation_supersession(tmp_path):
+    """When a relation has supersedes set, the old relation is removed from graph and MD."""
+    from src.core.models import GraphRelation
+
+    config = _setup_memory(tmp_path)
+
+    # Pre-create Alice with a parent_of relation to Bob in MD
+    alice_fm = EntityFrontmatter(
+        title="Alice", type="person", frequency=3,
+        importance=0.5, last_mentioned="2026-03-10", created="2026-01-01",
+    )
+    write_entity(
+        tmp_path / "close_ones" / "alice.md", alice_fm,
+        {"Facts": ["- [fact] Test person"], "Relations": ["- parent_of [[Bob]]"], "History": []},
+    )
+
+    bob_fm = EntityFrontmatter(
+        title="Bob", type="person", frequency=3,
+        importance=0.5, last_mentioned="2026-03-10", created="2026-01-01",
+    )
+    write_entity(
+        tmp_path / "close_ones" / "bob.md", bob_fm,
+        {"Facts": ["- [fact] Test person"], "Relations": [], "History": []},
+    )
+
+    # Pre-create graph with the old (wrong) relation
+    graph = GraphData()
+    graph = add_entity(graph, "alice", GraphEntity(
+        file="close_ones/alice.md", type="person", title="Alice",
+        frequency=3, importance=0.5, last_mentioned="2026-03-10",
+    ))
+    graph = add_entity(graph, "bob", GraphEntity(
+        file="close_ones/bob.md", type="person", title="Bob",
+        frequency=3, importance=0.5, last_mentioned="2026-03-10",
+    ))
+    from src.memory.graph import add_relation as graph_add_relation
+    graph = graph_add_relation(graph, GraphRelation(
+        from_entity="alice", to_entity="bob", type="parent_of",
+    ))
+    save_graph(tmp_path, graph)
+
+    # Now enrich with a new relation that supersedes the old one
+    resolved = ResolvedExtraction(
+        resolved=[
+            ResolvedEntity(
+                raw=RawEntity(name="Alice", type="person", observations=[]),
+                resolution=Resolution(status="resolved", entity_id="alice"),
+            ),
+        ],
+        relations=[
+            RawRelation(
+                from_name="Alice", to_name="Bob",
+                type="friend_of", context="actually friends",
+                supersedes="alice:bob:parent_of",
+            ),
+        ],
+        summary="Fix relation",
+    )
+
+    report = enrich_memory(resolved, config, today="2026-03-11")
+    assert report.relations_added >= 1
+    assert len(report.errors) == 0
+
+    # Verify old relation removed from graph, new one added
+    graph = load_graph(tmp_path)
+    parent_rels = [r for r in graph.relations if r.type == "parent_of"
+                   and r.from_entity == "alice" and r.to_entity == "bob"]
+    assert len(parent_rels) == 0, "Old parent_of relation should be removed"
+
+    friend_rels = [r for r in graph.relations if r.type == "friend_of"
+                   and r.from_entity == "alice" and r.to_entity == "bob"]
+    assert len(friend_rels) == 1, "New friend_of relation should exist"
+
+    # Verify old relation removed from MD file
+    alice_text = (tmp_path / "close_ones" / "alice.md").read_text()
+    assert "parent_of [[Bob]]" not in alice_text, "Old relation line should be removed from MD"
+    assert "friend_of [[Bob]]" in alice_text, "New relation line should be in MD"

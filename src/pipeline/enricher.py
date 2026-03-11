@@ -14,9 +14,9 @@ from src.core.models import (
     ResolvedExtraction,
 )
 from src.memory.context import write_index
-from src.memory.graph import add_entity, add_relation, load_graph, save_graph
+from src.memory.graph import add_entity, add_relation, load_graph, remove_relation, save_graph
 from src.memory.scoring import recalculate_all_scores
-from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, write_entity, consolidate_entity_facts
+from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, remove_relation_line, write_entity, consolidate_entity_facts
 from src.pipeline.resolver import slugify
 
 
@@ -81,6 +81,21 @@ def enrich_memory(
                     ))
 
             if from_slug and to_slug:
+                # Handle relation supersession
+                if rel.supersedes:
+                    parts = rel.supersedes.split(":")
+                    if len(parts) == 3:
+                        old_from, old_to, old_type = parts
+                        remove_relation(graph, old_from, old_to, old_type)
+                        # Clean MD file for the source entity
+                        old_from_entity = graph.entities.get(old_from)
+                        if old_from_entity:
+                            old_from_path = memory_path / old_from_entity.file
+                            if old_from_path.exists():
+                                old_to_entity = graph.entities.get(old_to)
+                                if old_to_entity:
+                                    remove_relation_line(old_from_path, old_type, old_to_entity.title)
+
                 graph_rel = GraphRelation(from_entity=from_slug, to_entity=to_slug, type=rel.type, context=rel.context)
                 graph = add_relation(graph, graph_rel, strength_growth=config.scoring.relation_strength_growth)
                 report.relations_added += 1
