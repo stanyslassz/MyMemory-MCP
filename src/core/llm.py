@@ -453,6 +453,33 @@ def call_dream_plan(memory_stats: str, config: Config) -> "DreamPlan":
     return _call_structured(config.llm_dream_effective, prompt, DreamPlan)
 
 
+def call_dedup_check(
+    title_a: str,
+    type_a: str,
+    summary_a: str,
+    title_b: str,
+    type_b: str,
+    summary_b: str,
+    config: Config,
+) -> "DedupVerdict":
+    """Ask LLM if two entities are duplicates."""
+    from src.core.models import DedupVerdict
+
+    schema = json.dumps(DedupVerdict.model_json_schema(), indent=2)
+    prompt = load_prompt(
+        "dedup_check",
+        config,
+        title_a=title_a,
+        type_a=type_a,
+        summary_a=summary_a or "N/A",
+        title_b=title_b,
+        type_b=type_b,
+        summary_b=summary_b or "N/A",
+        json_schema=schema,
+    )
+    return _call_structured(config.llm_dream_effective, prompt, DedupVerdict)
+
+
 def call_dream_validate(step_name: str, changes_summary: str, config: Config) -> "DreamValidation":
     """Ask LLM to validate results of a dream step."""
     from src.core.models import DreamValidation
