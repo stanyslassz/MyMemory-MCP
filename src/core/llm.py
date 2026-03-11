@@ -27,12 +27,14 @@ except ImportError:
     _repair_json = None
 
 
+_repair_local = threading.local()
+
+
 @contextmanager
 def _repaired_json():
     """Patch json.loads to auto-repair malformed LLM JSON output.
 
-    Uses json-repair library to fix common small-model errors:
-    unquoted keys, trailing commas, single quotes, etc.
+    Uses thread-local storage so concurrent threads don't interfere.
     Falls back to normal json.loads if json-repair is not installed.
     """
     if _repair_json is None:
@@ -44,28 +46,31 @@ def _repaired_json():
 
     def _patched(s, *args, **kwargs):
         nonlocal repair_count
+        # Only apply repair if this thread opted in
+        if not getattr(_repair_local, 'active', False):
+            return original(s, *args, **kwargs)
         try:
             return original(s, *args, **kwargs)
         except json.JSONDecodeError:
             repair_count += 1
-            # First repair: warn. Subsequent: debug (streaming produces many partial chunks).
             if repair_count == 1:
                 logger.warning("JSON parse failed, attempting repair...")
             else:
                 logger.debug("JSON parse failed, attempting repair... (#%d)", repair_count)
-            # Restore original json.loads during repair to avoid recursion
-            # (json_repair internally calls json.loads)
-            json.loads = original
+            # Temporarily disable repair to avoid recursion
+            _repair_local.active = False
             try:
                 repaired = _repair_json(s, return_objects=False)
             finally:
-                json.loads = _patched
+                _repair_local.active = True
             return original(repaired, *args, **kwargs)
 
+    _repair_local.active = True
     json.loads = _patched
     try:
         yield
     finally:
+        _repair_local.active = False
         json.loads = original
 
 
@@ -459,25 +464,6 @@ def call_relation_discovery(
     return _call_structured(config.llm_dream_effective, prompt, RelationProposal)
 
 
-def call_dream_plan(memory_stats: str, config: Config) -> "DreamPlan":
-    """Ask LLM to plan which dream steps to execute."""
-    from src.core.models import DreamPlan
-
-    schema = json.dumps(DreamPlan.model_json_schema(), indent=2)
-    prompt = load_prompt(
-        "dream_plan",
-        config,
-        memory_stats=memory_stats,
-        json_schema=schema,
-        unextracted_docs="(see stats)",
-        consolidation_candidates="(see stats)",
-        merge_candidates="(see stats)",
-        relation_candidates="(see stats)",
-        prune_candidates="(see stats)",
-        summary_candidates="(see stats)",
-    )
-    return _call_structured(config.llm_dream_effective, prompt, DreamPlan)
-
 
 def call_dedup_check(
     title_a: str,
@@ -506,16 +492,3 @@ def call_dedup_check(
     return _call_structured(config.llm_dream_effective, prompt, DedupVerdict)
 
 
-def call_dream_validate(step_name: str, changes_summary: str, config: Config) -> "DreamValidation":
-    """Ask LLM to validate results of a dream step."""
-    from src.core.models import DreamValidation
-
-    schema = json.dumps(DreamValidation.model_json_schema(), indent=2)
-    prompt = load_prompt(
-        "dream_validate",
-        config,
-        step_name=step_name,
-        changes_summary=changes_summary,
-        json_schema=schema,
-    )
-    return _call_structured(config.llm_dream_effective, prompt, DreamValidation)

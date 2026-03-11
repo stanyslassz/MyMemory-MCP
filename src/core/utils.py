@@ -24,6 +24,7 @@ def estimate_tokens(text: str) -> int:
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from a markdown file. Returns (fm_dict, body)."""
+    text = text.replace("\r\n", "\n")
     match = re.match(r"^---\n(.*?\n)---\n(.*)", text, re.DOTALL)
     if not match:
         return {}, text

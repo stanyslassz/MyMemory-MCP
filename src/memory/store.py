@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,26 @@ import yaml
 
 from src.core.models import EntityFrontmatter
 from src.core.utils import parse_frontmatter as _shared_parse_frontmatter
+
+
+def _atomic_write_text(filepath: Path, content: str) -> None:
+    """Write content to file atomically via temp file + os.replace."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        os.replace(tmp, filepath)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def init_memory_structure(memory_path: Path) -> None:
@@ -51,7 +73,7 @@ def write_entity(filepath: Path, frontmatter: EntityFrontmatter, sections: dict[
                 lines.append(f"{item}\n")
         lines.append("\n")
 
-    filepath.write_text("".join(lines), encoding="utf-8")
+    _atomic_write_text(filepath, "".join(lines))
 
 
 def update_entity(
@@ -336,7 +358,7 @@ def save_chat(messages: list[dict], memory_path: Path) -> Path:
         content = msg.get("content", "")
         lines.append(f"**{role}**: {content}\n\n")
 
-    filepath.write_text("".join(lines), encoding="utf-8")
+    _atomic_write_text(filepath, "".join(lines))
     return filepath
 
 
@@ -370,7 +392,7 @@ def mark_chat_processed(
     fm_data["entities_created"] = entities_created
 
     fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
 
 
 def mark_chat_fallback(
@@ -394,7 +416,7 @@ def mark_chat_fallback(
     fm_data["entities_created"] = []
 
     fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
 
 
 def increment_extraction_retries(filepath: Path) -> int:
@@ -406,7 +428,7 @@ def increment_extraction_retries(filepath: Path) -> int:
     fm_data["extraction_retries"] = retries
 
     fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    filepath.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
     return retries
 
 
@@ -445,7 +467,7 @@ _VALENCE_MARKERS = {"positive": "[+]", "negative": "[-]", "neutral": "[~]"}
 _VALENCE_REVERSE = {v: k for k, v in _VALENCE_MARKERS.items()}
 
 
-def _format_observation(obs: dict) -> str:
+def format_observation(obs: dict) -> str:
     """Format an observation dict to markdown line.
 
     Format: - [category] (YYYY-MM) content [+] #tags
@@ -475,7 +497,7 @@ def _format_observation(obs: dict) -> str:
     return line
 
 
-def _parse_observation(line: str) -> dict | None:
+def parse_observation(line: str) -> dict | None:
     """Parse a markdown fact line back into a dict.
 
     Handles: - [category] (date) content [+/-/~] #tags [superseded]
@@ -492,12 +514,13 @@ def _parse_observation(line: str) -> dict | None:
     if superseded:
         rest = rest.replace("[superseded]", "").strip()
 
-    # Extract valence marker
+    # Extract valence marker (only at end of content, before optional #tags)
     valence = ""
     for marker, val in _VALENCE_REVERSE.items():
-        if f" {marker}" in rest:
+        pattern = r' ' + re.escape(marker) + r'(?=\s*(#|$))'
+        if re.search(pattern, rest):
             valence = val
-            rest = rest.replace(f" {marker}", "", 1).strip()
+            rest = re.sub(pattern, '', rest, count=1).strip()
             break
 
     # Extract tags
@@ -513,6 +536,11 @@ def _parse_observation(line: str) -> dict | None:
     if superseded:
         result["superseded"] = True
     return result
+
+
+# Backward-compatible aliases
+_parse_observation = parse_observation
+_format_observation = format_observation
 
 
 def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:

@@ -20,8 +20,8 @@ from src.memory.store import (
     remove_relation_line,
     save_chat as store_save_chat,
     write_entity,
-    _parse_observation,
-    _format_observation,
+    parse_observation,
+    format_observation,
 )
 from src.pipeline.indexer import search as faiss_search
 
@@ -277,7 +277,10 @@ def search_rag(query: str) -> dict:
             promoted = True
 
     if promoted:
-        save_graph(memory_path, graph)
+        try:
+            save_graph(memory_path, graph)
+        except RuntimeError:
+            logger.warning("Could not save graph after L2→L1 bump (locked by another process)")
 
     return {
         "query": query,
@@ -326,7 +329,7 @@ def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> st
     content_lower = fact_content.lower()
     matched_idx = None
     for i, line in enumerate(facts):
-        obs = _parse_observation(line)
+        obs = parse_observation(line)
         if obs and content_lower in obs["content"].lower():
             matched_idx = i
             break
@@ -410,7 +413,7 @@ def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, conf
     content_lower = old_content.lower()
     matched_idx = None
     for i, line in enumerate(facts):
-        obs = _parse_observation(line)
+        obs = parse_observation(line)
         if obs and content_lower in obs["content"].lower():
             matched_idx = i
             break
@@ -420,10 +423,10 @@ def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, conf
 
     # Parse the matched line to preserve metadata
     old_line = facts[matched_idx]
-    obs = _parse_observation(old_line)
+    obs = parse_observation(old_line)
     old_fact_content = obs["content"]
     obs["content"] = new_content
-    new_line = _format_observation(obs)
+    new_line = format_observation(obs)
     facts[matched_idx] = new_line
     sections["Facts"] = facts
 

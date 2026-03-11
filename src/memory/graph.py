@@ -52,10 +52,18 @@ def load_graph(memory_path: Path) -> GraphData:
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             logger.warning("Corrupt _graph.json.bak: %s", exc)
 
-    # Last resort: rebuild from MDs
+    # Last resort: rebuild from MDs (under lock to prevent concurrent writes)
     logger.warning("Rebuilding graph from markdown files")
-    graph = rebuild_from_md(memory_path)
-    save_graph(memory_path, graph)
+    lock_path = memory_path / "_graph.lock"
+    _acquire_lock(lock_path)
+    try:
+        graph = rebuild_from_md(memory_path)
+        graph_path = memory_path / "_graph.json"
+        graph.generated = datetime.now().isoformat()
+        data = graph.model_dump(by_alias=True)
+        _atomic_write(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
+    finally:
+        _release_lock(lock_path)
     return graph
 
 

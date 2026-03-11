@@ -171,6 +171,9 @@ def _split_text(text: str, segment_tokens: int, overlap_tokens: int) -> list[str
     words = text.split()
     words_per_segment = int(segment_tokens / 1.3)
     words_overlap = int(overlap_tokens / 1.3)
+    if words_per_segment <= 0:
+        return [text]
+    words_overlap = min(words_overlap, words_per_segment - 1)
 
     if len(words) <= words_per_segment:
         return [text]

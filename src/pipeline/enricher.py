@@ -17,7 +17,7 @@ from src.memory.context import write_index
 from src.memory.graph import add_entity, add_relation, load_graph, remove_relation, save_graph
 from src.memory.scoring import recalculate_all_scores
 from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, remove_relation_line, write_entity, consolidate_entity_facts
-from src.pipeline.resolver import slugify
+from src.core.utils import slugify
 
 
 # Families of mutually exclusive relation types between the same entity pair.
@@ -215,10 +215,10 @@ def _update_existing_entity(
     ]
 
     # Update MD file
-    update_entity(filepath, new_observations=new_obs, last_mentioned=today, max_facts=max_facts)
+    updated_fm = update_entity(filepath, new_observations=new_obs, last_mentioned=today, max_facts=max_facts)
 
     # Update graph metadata
-    entity_meta.frequency += 1
+    entity_meta.frequency = updated_fm.frequency
     entity_meta.last_mentioned = today
 
     # Update mention_dates (windowed)
@@ -248,7 +248,7 @@ def _create_new_entity(
     """Create a new entity from extraction results."""
     if slug in graph.entities:
         # Already exists, update instead
-        _update_existing_entity(slug, raw_entity, graph, memory_path, today, report)
+        _update_existing_entity(slug, raw_entity, graph, memory_path, today, report, config)
         return
 
     folder = config.get_folder_for_type(raw_entity.type)

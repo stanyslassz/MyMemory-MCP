@@ -332,14 +332,14 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
                             entity_id=arb_result.existing_id,
                         )
                     else:
-                        from src.pipeline.resolver import slugify
+                        from src.core.utils import slugify
                         item.resolution = Resolution(
                             status="new",
                             suggested_slug=slugify(item.raw.name),
                         )
                 except Exception as e:
                     console.print(f"  [yellow]Arbitration failed for {item.raw.name}: {e}[/yellow]")
-                    from src.pipeline.resolver import slugify
+                    from src.core.utils import slugify
                     item.resolution = Resolution(
                         status="new",
                         suggested_slug=slugify(item.raw.name),

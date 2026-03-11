@@ -6,11 +6,10 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from src.core.config import Config
-from src.core.llm import call_context_generation
 from src.core.models import GraphData, GraphEntity
 from src.core.utils import estimate_tokens as _estimate_tokens_util
 from src.memory.scoring import get_top_entities
-from src.memory.store import read_entity, _parse_observation
+from src.memory.store import read_entity, parse_observation, _atomic_write_text
 
 
 def _sort_facts_by_date(facts: list[str]) -> list[str]:
@@ -18,7 +17,7 @@ def _sort_facts_by_date(facts: list[str]) -> list[str]:
     dated: list[tuple[str, str]] = []
     undated: list[str] = []
     for fact in facts:
-        parsed = _parse_observation(fact)
+        parsed = parse_observation(fact)
         if parsed and parsed["date"]:
             dated.append((parsed["date"], fact))
         else:
@@ -73,7 +72,7 @@ def _deduplicate_facts_for_context(
     cat_counts: dict[str, int] = {}
     result = []
     for line in facts:
-        obs = _parse_observation(line)
+        obs = parse_observation(line)
         if not obs:
             result.append(line)
             continue
@@ -106,7 +105,7 @@ def _group_facts_by_category(facts: list[str]) -> dict[str, list[str]]:
     from collections import OrderedDict
     grouped: dict[str, list[str]] = OrderedDict()
     for line in facts:
-        obs = _parse_observation(line)
+        obs = parse_observation(line)
         if obs:
             cat = obs["category"]
             # Rebuild display content: (date) content [valence] #tags
@@ -179,19 +178,19 @@ def _sort_by_cluster(
 # ── Natural context helpers ──────────────────────────────────
 
 RELATION_NATURAL = {
-    "parent_of": "parent de",
-    "lives_with": "vit avec",
-    "works_at": "travaille chez",
-    "friend_of": "ami(e) de",
-    "affects": "lié à",
-    "improves": "amélioré par",
-    "worsens": "aggravé par",
-    "uses": "utilise",
-    "part_of": "fait partie de",
-    "linked_to": "lié à",
-    "requires": "nécessite",
-    "contrasts_with": "contraste avec",
-    "precedes": "précède",
+    "parent_of": "parent of",
+    "lives_with": "lives with",
+    "works_at": "works at",
+    "friend_of": "friend of",
+    "affects": "linked to",
+    "improves": "improved by",
+    "worsens": "worsened by",
+    "uses": "uses",
+    "part_of": "part of",
+    "linked_to": "linked to",
+    "requires": "requires",
+    "contrasts_with": "contrasts with",
+    "precedes": "precedes",
 }
 
 
@@ -234,10 +233,10 @@ def _select_entities_for_natural(
 
 
 def _classify_temporal(entity: GraphEntity, today: date) -> str:
-    """Classify entity into 'long_terme', 'moyen_terme', or 'court_terme'."""
+    """Classify entity into 'long_term', 'medium_term', or 'short_term'."""
     last = date.fromisoformat(entity.last_mentioned) if entity.last_mentioned else None
     if not last:
-        return "long_terme"
+        return "long_term"
     days_since = (today - last).days
 
     # Stable entities (people, animals with long history) → always long term
@@ -247,14 +246,14 @@ def _classify_temporal(entity: GraphEntity, today: date) -> str:
         and entity.frequency >= 5
     )
     if is_stable:
-        return "long_terme"
+        return "long_term"
 
     if days_since <= 7:
-        return "court_terme"
+        return "short_term"
     elif days_since <= 30:
-        return "moyen_terme"
+        return "medium_term"
     else:
-        return "long_terme"
+        return "long_term"
 
 
 def _build_natural_bullet(
@@ -269,7 +268,7 @@ def _build_natural_bullet(
         facts = [f for f in facts if "[superseded]" not in f]
         if facts:
             # Take the last fact (most recently added), clean markers
-            obs = _parse_observation(facts[-1])
+            obs = parse_observation(facts[-1])
             base = obs["content"] if obs else facts[-1].lstrip("- ")
         else:
             base = entity.title
@@ -305,7 +304,7 @@ def _extract_vigilances(
     for eid, entity in all_selected:
         facts = _read_entity_facts(eid, entity, memory_path)
         for f in facts:
-            obs = _parse_observation(f)
+            obs = parse_observation(f)
             if obs and obs["category"] in ("vigilance", "diagnosis", "treatment"):
                 if obs.get("valence") == "negative" or obs["category"] == "vigilance":
                     vigilances.append(f"- {entity.title}: {obs['content']}")
@@ -344,7 +343,7 @@ def _enrich_entity_natural(
 
     lines = [f"### {entity.title} [{entity.type}]"]
     if entity.summary:
-        lines.append(f"Résumé: {entity.summary}")
+        lines.append(f"Summary: {entity.summary}")
     if facts:
         facts = [f for f in facts if "[superseded]" not in f]
         facts = _deduplicate_facts_for_context(facts, max_per_category=3)
@@ -534,7 +533,7 @@ def build_natural_context(
         template = template_path.read_text(encoding="utf-8")
     else:
         template = (
-            "# Mémoire Personnelle — {date}\n\n{ai_personality}\n\n---\n\n"
+            "# Personal Memory — {date}\n\n{ai_personality}\n\n---\n\n"
             "{sections}\n\n---\n\n{available_entities}\n\n{extended_memory}\n\n{custom_instructions}"
         )
 
@@ -562,19 +561,19 @@ def build_natural_context(
     ai_personality = "\n".join(ai_parts) if ai_parts else ""
 
     # Classify temporally (excluding ai_self)
-    long_terme: list[tuple[str, GraphEntity]] = []
-    moyen_terme: list[tuple[str, GraphEntity]] = []
-    court_terme: list[tuple[str, GraphEntity]] = []
+    long_term: list[tuple[str, GraphEntity]] = []
+    medium_term: list[tuple[str, GraphEntity]] = []
+    short_term: list[tuple[str, GraphEntity]] = []
     for eid, entity in selected:
         if entity.type == "ai_self":
             continue
         tier = _classify_temporal(entity, today)
-        if tier == "long_terme":
-            long_terme.append((eid, entity))
-        elif tier == "moyen_terme":
-            moyen_terme.append((eid, entity))
+        if tier == "long_term":
+            long_term.append((eid, entity))
+        elif tier == "medium_term":
+            medium_term.append((eid, entity))
         else:
-            court_terme.append((eid, entity))
+            short_term.append((eid, entity))
 
     # Build sections with token budget
     def build_section(entities: list[tuple[str, GraphEntity]], budget_key: str, default_pct: int = 25, section_label: str = "") -> str:
@@ -593,9 +592,9 @@ def build_natural_context(
             used += cost
         return "\n".join(lines)
 
-    long_text = build_section(long_terme, "long_terme", 35, "Identité & long terme")
-    moyen_text = build_section(moyen_terme, "moyen_terme", 25, "En ce moment")
-    court_text = build_section(court_terme, "court_terme", 20, "Cette semaine")
+    long_text = build_section(long_term, "long_term", 35, "Identity & long term")
+    moyen_text = build_section(medium_term, "medium_term", 25, "Medium term")
+    court_text = build_section(short_term, "short_term", 20, "Short term")
 
     # Vigilances
     vigilances = _extract_vigilances(selected, graph, memory_path)
@@ -604,13 +603,13 @@ def build_natural_context(
     # Assemble sections
     sections_parts = []
     if long_text:
-        sections_parts.append(f"## Identité & long terme\n\n{long_text}")
+        sections_parts.append(f"## Identity & long term\n\n{long_text}")
     if moyen_text:
-        sections_parts.append(f"## En ce moment\n\n{moyen_text}")
+        sections_parts.append(f"## Medium term\n\n{moyen_text}")
     if court_text:
-        sections_parts.append(f"## Cette semaine\n\n{court_text}")
+        sections_parts.append(f"## Short term\n\n{court_text}")
     if vigilance_text:
-        sections_parts.append(f"## Points de vigilance\n\n{vigilance_text}")
+        sections_parts.append(f"## Vigilances\n\n{vigilance_text}")
 
     # Available entities (not shown in detail)
     shown_ids = {eid for eid, _ in selected}
@@ -620,12 +619,12 @@ def build_natural_context(
         reverse=True,
     )[:30]
     available_text = (
-        "Autres sujets en mémoire : " + ", ".join(e.title for _, e in remaining)
+        "Other topics in memory: " + ", ".join(e.title for _, e in remaining)
         if remaining
         else ""
     )
 
-    extended = "Pour plus de détails sur un sujet, utilise l'outil `search_rag`."
+    extended = "For more details on any topic, use the `search_rag` tool."
 
     # Assemble template
     result = template
@@ -722,7 +721,7 @@ def build_context(
                     facts = sections.get("Facts", [])
                     vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
                     for vf in vig_facts[:2]:  # Max 2 per entity to reduce duplication
-                        obs = _parse_observation(vf)
+                        obs = parse_observation(vf)
                         content = obs["content"] if obs else vf
                         vigilance_parts.append(f"- {entity.title}: {content}")
                 except Exception:
@@ -936,7 +935,7 @@ def build_context_with_llm(
                     facts = sections.get("Facts", [])
                     vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
                     for vf in vig_facts[:2]:
-                        obs = _parse_observation(vf)
+                        obs = parse_observation(vf)
                         content = obs["content"] if obs else vf
                         vigilance_parts.append(f"- {entity.title}: {content}")
                 except Exception:
@@ -978,29 +977,10 @@ def build_context_with_llm(
     return result
 
 
-def build_context_input(graph: GraphData, memory_path: Path, config: Config) -> str:
-    """Build enriched dossier for LLM narrative mode input."""
-    top = get_top_entities(
-        graph,
-        n=15,
-        include_permanent=True,
-        min_score=config.scoring.min_score_for_context,
-    )
-    sections = []
-    for entity_id, entity in top:
-        dossier = _enrich_entity(entity_id, entity, graph, memory_path)
-        sections.append(dossier)
-    return "\n\n".join(sections)
-
-
-def generate_context(enriched_input: str, config: Config) -> str:
-    """Generate _context.md content using LLM."""
-    return call_context_generation(enriched_input, config)
-
 
 def write_context(memory_path: Path, content: str) -> None:
     """Write _context.md file."""
-    (memory_path / "_context.md").write_text(content, encoding="utf-8")
+    _atomic_write_text(memory_path / "_context.md", content)
 
 
 def generate_index(graph: GraphData) -> str:
@@ -1038,4 +1018,4 @@ def generate_index(graph: GraphData) -> str:
 def write_index(memory_path: Path, graph: GraphData) -> None:
     """Write _index.md file."""
     content = generate_index(graph)
-    (memory_path / "_index.md").write_text(content, encoding="utf-8")
+    _atomic_write_text(memory_path / "_index.md", content)

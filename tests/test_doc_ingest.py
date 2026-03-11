@@ -78,7 +78,7 @@ class TestDocumentIngest:
         key = IngestKey(source_id="test.md", content_hash="abc123", chunk_policy_version=CHUNK_POLICY_VERSION)
         content = "# Test Document\n\nThis is a test document with enough content to index."
 
-        with patch("src.pipeline.doc_ingest._get_embedding_fn", return_value=_mock_embed):
+        with patch("src.pipeline.doc_ingest.get_embedding_fn", return_value=_mock_embed):
             result = ingest_document("test.md", content, key, tmp_path, config)
 
         assert result["chunks_indexed"] >= 1
@@ -91,7 +91,7 @@ class TestDocumentIngest:
         content = "# Test\n\nSame content"
         key = IngestKey(source_id="test.md", content_hash="same_hash", chunk_policy_version=CHUNK_POLICY_VERSION)
 
-        with patch("src.pipeline.doc_ingest._get_embedding_fn", return_value=_mock_embed):
+        with patch("src.pipeline.doc_ingest.get_embedding_fn", return_value=_mock_embed):
             r1 = ingest_document("test.md", content, key, tmp_path, config)
             assert r1["chunks_indexed"] >= 1
 
@@ -105,7 +105,7 @@ class TestDocumentIngest:
 
         key = IngestKey(source_id="empty.md", content_hash="empty", chunk_policy_version=CHUNK_POLICY_VERSION)
 
-        with patch("src.pipeline.doc_ingest._get_embedding_fn", return_value=_mock_embed):
+        with patch("src.pipeline.doc_ingest.get_embedding_fn", return_value=_mock_embed):
             result = ingest_document("empty.md", "", key, tmp_path, config)
 
         assert result["chunks_indexed"] == 0
@@ -118,7 +118,7 @@ class TestDocumentIngest:
         key = IngestKey(source_id="doc.md", content_hash="hash123", chunk_policy_version=CHUNK_POLICY_VERSION)
         content = "# Document\n\nContent for manifest test."
 
-        with patch("src.pipeline.doc_ingest._get_embedding_fn", return_value=_mock_embed):
+        with patch("src.pipeline.doc_ingest.get_embedding_fn", return_value=_mock_embed):
             ingest_document("doc.md", content, key, tmp_path, config)
 
         manifest = json.loads(Path(config.faiss.manifest_path).read_text())

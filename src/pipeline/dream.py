@@ -123,7 +123,7 @@ def run_dream(
 
                 elif s == 4:
                     before = {"total_entities": len(graph.entities)}
-                    _step_merge_entities(graph, memory_path, config, console, report, dry_run)
+                    _step_merge_entities(graph, memory_path, config, console, report, dry_run, entity_paths)
                     summary = f"{report.entities_merged} merged"
                     if report.entities_merged > 0 and not dry_run:
                         after = {"total_entities": len(graph.entities)}
@@ -531,6 +531,7 @@ def _step_merge_entities(
     console: Console,
     report: DreamReport,
     dry_run: bool,
+    entity_paths: dict[str, Path] | None = None,
 ) -> None:
     """Step 4: Detect and merge duplicate entities (slug similarity + FAISS)."""
     # Group by slug similarity (prefix match or containment)
@@ -611,7 +612,7 @@ def _step_merge_entities(
 
         console.print(f"  [cyan]Merging '{drop_entity.title}' -> '{keep_entity.title}'[/cyan]")
         try:
-            _do_merge(keep, drop, graph, memory_path, config)
+            _do_merge(keep, drop, graph, memory_path, config, entity_paths)
             report.entities_merged += 1
         except Exception as e:
             report.errors.append(f"Merge failed {drop} -> {keep}: {e}")
@@ -624,6 +625,7 @@ def _do_merge(
     graph: GraphData,
     memory_path: Path,
     config: Config,
+    entity_paths: dict[str, Path] | None = None,
 ) -> None:
     """Merge drop entity into keep entity: combine facts, aliases, relations."""
     from src.memory.store import read_entity, write_entity
@@ -646,9 +648,8 @@ def _do_merge(
     keep_fm.aliases = sorted(all_aliases)
 
     # Merge facts (dedup by content)
-    keep_facts = set(keep_sections.get("Facts", []))
     for fact in drop_sections.get("Facts", []):
-        if fact not in keep_facts:
+        if fact not in keep_sections.get("Facts", []):
             keep_sections.setdefault("Facts", []).append(fact)
 
     # Merge tags
@@ -689,6 +690,8 @@ def _do_merge(
     archive_dir = memory_path / "_archive"
     archive_dir.mkdir(exist_ok=True)
     shutil.move(str(drop_path), str(archive_dir / drop_path.name))
+    if entity_paths is not None:
+        entity_paths.pop(drop_id, None)
 
     # Update keep entity in graph
     keep_entity.aliases = keep_fm.aliases
@@ -982,6 +985,13 @@ def _step_prune_dead(
         from src.memory.graph import remove_orphan_relations, save_graph
         remove_orphan_relations(graph)
         save_graph(memory_path, graph)
+        # Mark FAISS as needing rebuild (handled by step 10 in full pipeline,
+        # but needed here for standalone --step 7 runs)
+        try:
+            from src.pipeline.indexer import build_index
+            build_index(memory_path, config)
+        except Exception as e:
+            console.print(f"  [yellow]FAISS rebuild after pruning: {e}[/yellow]")
 
 
 def _step_generate_summaries(

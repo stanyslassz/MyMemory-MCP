@@ -29,7 +29,7 @@ def _normalize_l2(vectors: np.ndarray) -> np.ndarray:
     return (vectors / norms).astype(np.float32)
 
 
-def _get_embedding_fn(config: Config):
+def get_embedding_fn(config: Config):
     """Get an embedding function based on config.
 
     All providers return L2-normalized vectors so that FAISS IndexFlatIP
@@ -83,7 +83,7 @@ def _get_embedding_fn(config: Config):
         raise ValueError(f"Unknown embedding provider: {provider}")
 
 
-def _chunk_text(text: str, chunk_size: int = 400, overlap: int = 80) -> list[str]:
+def chunk_text(text: str, chunk_size: int = 400, overlap: int = 80) -> list[str]:
     """Split text into overlapping chunks by approximate token count (words/1.3)."""
     words = text.split()
     approx_tokens_per_word = 1.3
@@ -112,7 +112,7 @@ def _file_hash(filepath: Path) -> str:
     return hashlib.sha256(filepath.read_bytes()).hexdigest()
 
 
-def _load_manifest(manifest_path: str) -> dict:
+def load_manifest(manifest_path: str) -> dict:
     """Load FAISS manifest from JSON."""
     path = Path(manifest_path)
     if not path.exists():
@@ -120,11 +120,18 @@ def _load_manifest(manifest_path: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _save_manifest(manifest_path: str, manifest: dict) -> None:
+def save_manifest(manifest_path: str, manifest: dict) -> None:
     """Save FAISS manifest to JSON."""
     Path(manifest_path).write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+
+# Backward-compatible aliases
+_chunk_text = chunk_text
+_get_embedding_fn = get_embedding_fn
+_load_manifest = load_manifest
+_save_manifest = save_manifest
 
 
 def _get_entity_files(memory_path: Path) -> list[Path]:
@@ -143,7 +150,7 @@ def build_index(memory_path: Path, config: Config) -> dict:
     """Build FAISS index from scratch. Returns manifest."""
     import faiss
 
-    embed_fn = _get_embedding_fn(config)
+    embed_fn = get_embedding_fn(config)
     files = _get_entity_files(memory_path)
 
     all_chunks: list[str] = []
@@ -160,7 +167,7 @@ def build_index(memory_path: Path, config: Config) -> dict:
         rel_path = str(md_file.relative_to(memory_path))
         entity_id = md_file.stem
 
-        chunks = _chunk_text(text, config.embeddings.chunk_size, config.embeddings.chunk_overlap)
+        chunks = chunk_text(text, config.embeddings.chunk_size, config.embeddings.chunk_overlap)
 
         start_idx = len(all_chunks)
         for i, chunk in enumerate(chunks):
@@ -178,8 +185,12 @@ def build_index(memory_path: Path, config: Config) -> dict:
         }
 
     if not all_chunks:
-        # Create empty index
-        dim = 384  # default dimension for all-MiniLM-L6-v2
+        # Probe embedding function to get actual dimension
+        try:
+            probe = embed_fn(["test"])
+            dim = probe.shape[1]
+        except Exception:
+            dim = 384  # fallback for all-MiniLM-L6-v2
         index = faiss.IndexFlatIP(dim)
         _save_index(config, index, chunk_mapping, manifest)
         return manifest
@@ -198,7 +209,7 @@ def build_index(memory_path: Path, config: Config) -> dict:
 
 def incremental_update(memory_path: Path, config: Config) -> dict:
     """Incrementally update FAISS index — only re-index modified files."""
-    manifest = _load_manifest(config.faiss.manifest_path)
+    manifest = load_manifest(config.faiss.manifest_path)
 
     # Check if model changed → full rebuild
     current_model = f"{config.embeddings.provider}/{config.embeddings.model}"
@@ -268,7 +279,7 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
     if index.ntotal == 0:
         return []
 
-    embed_fn = _get_embedding_fn(config)
+    embed_fn = get_embedding_fn(config)
     query_vec = embed_fn([query]).astype(np.float32)
 
     k = min(top_k, index.ntotal)
@@ -291,7 +302,7 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
 
 def list_unextracted_docs(manifest_path: str) -> list[dict]:
     """List documents in FAISS manifest that haven't been entity-extracted."""
-    manifest = _load_manifest(manifest_path)
+    manifest = load_manifest(manifest_path)
     docs = []
     for key, entry in manifest.get("indexed_files", {}).items():
         if entry.get("source_type") != "document":
@@ -305,10 +316,10 @@ def list_unextracted_docs(manifest_path: str) -> list[dict]:
 
 def mark_doc_extracted(manifest_path: str, doc_key: str) -> None:
     """Mark a document as entity-extracted in the manifest."""
-    manifest = _load_manifest(manifest_path)
+    manifest = load_manifest(manifest_path)
     if doc_key in manifest.get("indexed_files", {}):
         manifest["indexed_files"][doc_key]["entity_extracted"] = True
-        _save_manifest(manifest_path, manifest)
+        save_manifest(manifest_path, manifest)
 
 
 def _save_index(config: Config, index, chunk_mapping: list[dict], manifest: dict) -> None:
@@ -323,4 +334,4 @@ def _save_index(config: Config, index, chunk_mapping: list[dict], manifest: dict
     faiss.write_index(index, str(index_path))
     with open(mapping_path, "wb") as f:
         pickle.dump(chunk_mapping, f)
-    _save_manifest(config.faiss.manifest_path, manifest)
+    save_manifest(config.faiss.manifest_path, manifest)

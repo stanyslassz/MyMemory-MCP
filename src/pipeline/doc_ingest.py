@@ -9,7 +9,7 @@ from pathlib import Path
 from src.core.config import Config
 from src.core.metrics import metrics
 from src.core.models import IngestKey
-from src.pipeline.indexer import _chunk_text, _get_embedding_fn, _load_manifest, _save_manifest
+from src.pipeline.indexer import chunk_text, get_embedding_fn, load_manifest, save_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +56,18 @@ def ingest_document(
         return {"chunks_indexed": 0, "source_id": source_id}
 
     # Chunk
-    chunks = _chunk_text(normalized, config.embeddings.chunk_size, config.embeddings.chunk_overlap)
+    chunks = chunk_text(normalized, config.embeddings.chunk_size, config.embeddings.chunk_overlap)
     if not chunks:
         return {"chunks_indexed": 0, "source_id": source_id}
 
     # Embed
-    embed_fn = _get_embedding_fn(config)
+    embed_fn = get_embedding_fn(config)
     embeddings = embed_fn(chunks)
 
     # Load existing index or create new
     index_path = Path(config.faiss.index_path)
     mapping_path = Path(config.faiss.mapping_path)
-    manifest = _load_manifest(config.faiss.manifest_path)
+    manifest = load_manifest(config.faiss.manifest_path)
 
     if index_path.exists() and mapping_path.exists():
         index = faiss.read_index(str(index_path))
@@ -116,7 +116,7 @@ def ingest_document(
     faiss.write_index(index, str(index_path))
     with open(mapping_path, "wb") as f:
         pickle.dump(chunk_mapping, f)
-    _save_manifest(config.faiss.manifest_path, manifest)
+    save_manifest(config.faiss.manifest_path, manifest)
 
     metrics.record_ingest_success(source_id, len(chunks))
     logger.info("Indexed document %s: %d chunks", source_id, len(chunks))

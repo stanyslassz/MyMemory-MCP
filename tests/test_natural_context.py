@@ -100,27 +100,27 @@ def test_select_entities_filters_transient():
 # --- Test 2: Temporal classification (stable person) ---
 
 def test_classify_temporal_stable_person():
-    """Stable person (long_term, freq>=5) stays long_terme even if mentioned yesterday."""
+    """Stable person (long_term, freq>=5) stays long_term even if mentioned yesterday."""
     entity = _make_entity(
         type="person",
         retention="long_term",
         frequency=10,
         last_mentioned=(_today() - timedelta(days=1)).isoformat(),
     )
-    assert _classify_temporal(entity, _today()) == "long_terme"
+    assert _classify_temporal(entity, _today()) == "long_term"
 
 
 # --- Test 3: Temporal classification (recent project) ---
 
 def test_classify_temporal_recent_project():
-    """Project mentioned 3 days ago → court_terme."""
+    """Project mentioned 3 days ago → short_term."""
     entity = _make_entity(
         type="project",
         retention="short_term",
         frequency=2,
         last_mentioned=(_today() - timedelta(days=3)).isoformat(),
     )
-    assert _classify_temporal(entity, _today()) == "court_terme"
+    assert _classify_temporal(entity, _today()) == "short_term"
 
 
 # --- Test 4: Bullet with summary ---
@@ -180,7 +180,7 @@ def test_build_natural_bullet_with_relations():
         _write_entity_file(memory_path, entity_a)
         _write_entity_file(memory_path, entity_b)
         bullet = _build_natural_bullet("sciatique", entity_a, graph, memory_path)
-        assert "amélioré par" in bullet or "Natation" in bullet
+        assert "improved by" in bullet or "Natation" in bullet
 
 
 # --- Test 7: Extract vigilances ---
@@ -261,7 +261,7 @@ def test_build_natural_context_full():
         # Structure checks
         assert "Mémoire" in result
         assert "French" in result  # user_language_name
-        assert "Identité & long terme" in result or "Cette semaine" in result or "En ce moment" in result
+        assert "Identity & long term" in result or "Short term" in result or "Medium term" in result
         assert "Épouse" in result  # Anaïs via her summary
         assert "Hernie" in result or "Sciatique" in result
         assert "search_rag" in result
