@@ -206,6 +206,20 @@ def test_graph_relation_serialization_with_new_fields():
     assert restored.strength == 0.8
 
 
+def test_raw_relation_supersedes_field():
+    """RawRelation should have an optional supersedes field."""
+    from src.core.models import RawRelation
+
+    rel = RawRelation(from_name="Alice", to_name="Bob", type="parent_of")
+    assert rel.supersedes == ""
+
+    rel2 = RawRelation(
+        from_name="Alice", to_name="Bob", type="parent_of",
+        supersedes="alice:bob:linked_to"
+    )
+    assert rel2.supersedes == "alice:bob:linked_to"
+
+
 def test_ai_self_entity_type():
     """ai_self must be a valid entity type."""
     from src.core.models import RawEntity, RawObservation

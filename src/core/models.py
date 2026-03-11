@@ -50,6 +50,7 @@ class RawRelation(BaseModel):
     to_name: str
     type: RelationType
     context: str = ""
+    supersedes: str = ""  # "from_slug:to_slug:relation_type" of the old relation this replaces
 
 
 class RawExtraction(BaseModel):
