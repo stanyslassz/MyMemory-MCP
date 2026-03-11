@@ -711,7 +711,7 @@ def _build_dossier(eid: str, entity, memory_path: Path) -> str:
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
             live_facts = [f for f in facts if "[superseded]" not in f]
-            facts_text = "\n".join(live_facts[:10])
+            facts_text = "\n".join(live_facts[:3])  # Top 3 facts only
         except Exception:
             pass
 
