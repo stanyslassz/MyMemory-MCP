@@ -247,12 +247,15 @@ def call_extraction(chat_content: str, config: Config) -> RawExtraction:
     Uses stall-aware streaming: active token production resets the watchdog,
     so only real stalls trigger a timeout — not slow but progressing responses.
     """
+    from datetime import date as _date
+
     schema = json.dumps(RawExtraction.model_json_schema(), indent=2)
     prompt = load_prompt(
         "extract_facts",
         config,
         chat_content=chat_content,
         json_schema=schema,
+        today=_date.today().isoformat(),
     )
     stall_timeout = config.llm_extraction.timeout  # reuse timeout as stall threshold
     return _call_with_stall_detection(
