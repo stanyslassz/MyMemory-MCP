@@ -236,6 +236,41 @@ def test_hebbian_custom_growth_rate():
     assert graph.relations[0].strength == 0.6  # 0.5 + 0.1
 
 
+def test_remove_relation():
+    """remove_relation() should delete a relation by (from, to, type) tuple."""
+    from src.memory.graph import remove_relation
+    from src.core.models import GraphData, GraphEntity, GraphRelation
+
+    graph = GraphData(
+        generated="2026-03-10",
+        entities={
+            "alice": GraphEntity(file="close_ones/alice.md", type="person", title="Alice", score=0.5),
+            "bob": GraphEntity(file="close_ones/bob.md", type="person", title="Bob", score=0.5),
+        },
+        relations=[
+            GraphRelation(from_entity="alice", to_entity="bob", type="parent_of"),
+            GraphRelation(from_entity="alice", to_entity="bob", type="friend_of"),
+        ],
+    )
+    result = remove_relation(graph, "alice", "bob", "parent_of")
+    assert result is True
+    assert len(graph.relations) == 1
+    assert graph.relations[0].type == "friend_of"
+
+
+def test_remove_relation_not_found():
+    """remove_relation() returns False if no matching relation exists."""
+    from src.memory.graph import remove_relation
+    from src.core.models import GraphData, GraphRelation
+
+    graph = GraphData(generated="2026-03-10", entities={}, relations=[
+        GraphRelation(from_entity="a", to_entity="b", type="affects"),
+    ])
+    result = remove_relation(graph, "a", "b", "linked_to")
+    assert result is False
+    assert len(graph.relations) == 1
+
+
 def test_rebuild_from_md(tmp_path):
     # Create entity MD files
     fm1 = EntityFrontmatter(

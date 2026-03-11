@@ -116,6 +116,16 @@ def add_relation(graph: GraphData, relation: GraphRelation, *, strength_growth: 
     return graph
 
 
+def remove_relation(graph: GraphData, from_entity: str, to_entity: str, rel_type: str) -> bool:
+    """Remove a specific relation by (from, to, type) tuple. Returns True if found and removed."""
+    before = len(graph.relations)
+    graph.relations = [
+        r for r in graph.relations
+        if not (r.from_entity == from_entity and r.to_entity == to_entity and r.type == rel_type)
+    ]
+    return len(graph.relations) < before
+
+
 def remove_orphan_relations(graph: GraphData) -> GraphData:
     """Remove relations that reference non-existent entities."""
     graph.relations = [
