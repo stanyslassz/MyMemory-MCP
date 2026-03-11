@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 _VALID_RELATION_TYPES: set[str] = set(get_args(RelationType))
 
 
+def decide_dream_steps(stats: dict) -> list[int]:
+    """Deterministic dream step selection. Replaces LLM coordinator."""
+    steps = [1]  # Load always
+    if stats.get("unextracted_docs", 0) > 0:
+        steps.append(2)
+    if stats.get("consolidation_candidates", 0) >= 3:
+        steps.append(3)
+    if stats.get("merge_candidates", 0) >= 2:
+        steps.append(4)
+    if stats.get("relation_candidates", 0) >= 5:
+        steps.append(5)
+    if stats.get("transitive_candidates", 0) >= 3:
+        steps.append(6)
+    if stats.get("prune_candidates", 0) >= 1:
+        steps.append(7)
+    if stats.get("summary_candidates", 0) >= 3:
+        steps.append(8)
+    if any(s in steps for s in [2, 3, 4, 5, 6, 7, 8]):
+        steps.extend([9, 10])
+    return sorted(set(steps))
+
+
 class DreamReport:
     """Collects stats from each dream step."""
 
@@ -65,17 +87,11 @@ def run_dream(
     if step is not None:
         steps_to_run = [step]
     else:
-        # Try LLM coordinator for planning
+        # Deterministic step selection based on stats
         stats_text, counts = _collect_dream_stats(graph, entity_paths, config)
-        try:
-            from src.core.llm import call_dream_plan
-            plan = call_dream_plan(stats_text, config)
-            steps_to_run = plan.steps
-            logger.info("Dream plan (LLM): steps=%s, reason=%s", plan.steps, plan.reasoning)
-            console.print(f"[dim]Coordinator plan: {plan.reasoning}[/dim]")
-        except Exception as e:
-            logger.warning("Dream coordinator failed, running all steps: %s", e)
-            steps_to_run = list(range(1, 11))
+        steps_to_run = decide_dream_steps(counts)
+        logger.info("Dream plan (deterministic): steps=%s, stats=%s", steps_to_run, counts)
+        console.print(f"[dim]Coordinator plan (deterministic): steps {steps_to_run}[/dim]")
 
     # Always include step 1 (load)
     if 1 not in steps_to_run:
@@ -97,24 +113,30 @@ def run_dream(
                     dashboard.complete_step(s, f"{n} docs extracted" if n else "no docs pending")
 
                 elif s == 3:
+                    before = {"total_facts": _count_live_facts(entity_paths)}
                     _step_consolidate_facts(graph, entity_paths, config, console, report, dry_run)
                     summary = f"{report.facts_consolidated} consolidated"
                     if report.facts_consolidated > 0 and not dry_run:
-                        summary = _validate_step(s, summary, config, report)
+                        after = {"total_facts": _count_live_facts(entity_paths)}
+                        summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
                 elif s == 4:
+                    before = {"total_entities": len(graph.entities)}
                     _step_merge_entities(graph, memory_path, config, console, report, dry_run)
                     summary = f"{report.entities_merged} merged"
                     if report.entities_merged > 0 and not dry_run:
-                        summary = _validate_step(s, summary, config, report)
+                        after = {"total_entities": len(graph.entities)}
+                        summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
                 elif s == 5:
+                    before = {"total_relations": len(graph.relations)}
                     _step_discover_relations(graph, memory_path, config, console, report, dry_run)
                     summary = f"{report.relations_discovered} discovered"
                     if report.relations_discovered > 0 and not dry_run:
-                        summary = _validate_step(s, summary, config, report)
+                        after = {"total_relations": len(graph.relations)}
+                        summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
                 elif s == 6:
@@ -223,6 +245,30 @@ def _collect_dream_stats(
         if not entity.summary:
             counts["summary_candidates"] += 1
 
+    # Relation candidates (estimate: entities with FAISS neighbors minus existing relations)
+    # Use total entities minus connected entity ratio as rough proxy
+    connected_entities = len(related)
+    total = len(graph.entities)
+    counts["relation_candidates"] = max(0, total - connected_entities)
+
+    # Transitive candidates (count eligible triples from adjacency)
+    transitive_count = 0
+    existing_pairs: set[tuple[str, str]] = set()
+    for rel in graph.relations:
+        existing_pairs.add((rel.from_entity, rel.to_entity))
+        existing_pairs.add((rel.to_entity, rel.from_entity))
+    adj_strong: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rel in graph.relations:
+        if rel.strength >= 0.4:
+            adj_strong[rel.from_entity].append((rel.to_entity, rel.type))
+    for a, neighbors_a in adj_strong.items():
+        for b, type_ab in neighbors_a:
+            for c, type_bc in adj_strong.get(b, []):
+                if c != a and (a, c) not in existing_pairs:
+                    if (type_ab, type_bc) in _TRANSITIVE_RULES:
+                        transitive_count += 1
+    counts["transitive_candidates"] = transitive_count
+
     # Cluster analysis via BFS connected components
     adj: dict[str, set[str]] = defaultdict(set)
     for rel in graph.relations:
@@ -254,21 +300,47 @@ def _collect_dream_stats(
     return stats, counts
 
 
-def _validate_step(step_num: int, summary: str, config: Config, report: DreamReport) -> str:
-    """Validate a critical step result via LLM. Returns updated summary."""
+def validate_dream_step(step: int, before_state: dict, after_state: dict) -> tuple[bool, list[str]]:
+    """Deterministic validation of dream step results."""
+    issues = []
+    if step == 3:  # Consolidation
+        if after_state.get("total_facts", 0) > before_state.get("total_facts", 0):
+            issues.append("Consolidation increased fact count")
+    elif step == 4:  # Merge
+        if after_state.get("total_entities", 0) > before_state.get("total_entities", 0):
+            issues.append("Merge increased entity count")
+    elif step == 5:  # Relation discovery
+        new_rels = after_state.get("total_relations", 0) - before_state.get("total_relations", 0)
+        if new_rels > 50:
+            issues.append(f"Relation discovery added {new_rels} relations (suspiciously high)")
+    return len(issues) == 0, issues
+
+
+def _validate_step(step_num: int, summary: str, before_state: dict, after_state: dict, report: DreamReport) -> str:
+    """Validate a critical step result using deterministic checks. Returns updated summary."""
     step_names = {3: "Fact Consolidation", 4: "Entity Merging", 5: "Relation Discovery"}
     step_name = step_names.get(step_num, f"Step {step_num}")
-    try:
-        from src.core.llm import call_dream_validate
-        validation = call_dream_validate(step_name, summary, config)
-        if not validation.approved:
-            issues = "; ".join(validation.issues)
-            report.errors.append(f"Validation warning for {step_name}: {issues}")
-            return f"{summary} [!validated: {issues[:30]}]"
-        return f"{summary} [validated]"
-    except Exception as e:
-        logger.warning("Validation failed for step %d: %s", step_num, e)
-        return summary
+    approved, issues = validate_dream_step(step_num, before_state, after_state)
+    if not approved:
+        issues_str = "; ".join(issues)
+        report.errors.append(f"Validation warning for {step_name}: {issues_str}")
+        return f"{summary} [!validated: {issues_str[:30]}]"
+    return f"{summary} [validated]"
+
+
+def _count_live_facts(entity_paths: dict[str, Path]) -> int:
+    """Count total live (non-superseded) facts across all entities."""
+    from src.memory.store import read_entity
+
+    total = 0
+    for path in entity_paths.values():
+        try:
+            _, sections = read_entity(path)
+            facts = sections.get("Facts", [])
+            total += sum(1 for f in facts if "[superseded]" not in f)
+        except Exception:
+            pass
+    return total
 
 
 # ── Step implementations ─────────────────────────────────────
