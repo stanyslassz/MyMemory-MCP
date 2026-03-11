@@ -362,7 +362,7 @@ def call_fact_consolidation(
         facts_text=facts_text,
         max_facts=str(max_facts),
     )
-    return _call_structured(config.llm_context, prompt, FactConsolidation)
+    return _call_structured(config.llm_consolidation, prompt, FactConsolidation)
 
 
 def call_entity_summary(

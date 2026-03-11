@@ -198,7 +198,7 @@ def extract_from_chat(chat_content: str, config: Config) -> RawExtraction:
         return RawExtraction(entities=[], relations=[], summary="")
 
     content_tokens = _estimate_tokens(chat_content)
-    prompt_overhead = 500
+    prompt_overhead = 1500
     context_window = config.llm_extraction.context_window
     threshold = int(context_window * 0.7)
 
