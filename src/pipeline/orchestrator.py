@@ -246,6 +246,15 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
     """Shared pipeline logic for run and run-light."""
     memory_path = config.memory_path
 
+    # Recover any ingest jobs stuck in 'running' from a previous crash
+    from src.pipeline.ingest_state import recover_stale_jobs
+    try:
+        recovered = recover_stale_jobs(config)
+        if recovered:
+            console.print(f"  [yellow]Recovered {len(recovered)} stale ingest job(s)[/yellow]")
+    except Exception as e:
+        logger.warning("recover_stale_jobs failed: %s", e)
+
     from src.memory.store import (
         list_unprocessed_chats, get_chat_content, mark_chat_processed,
         mark_chat_fallback, increment_extraction_retries,

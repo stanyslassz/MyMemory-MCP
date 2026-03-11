@@ -221,7 +221,7 @@ def _create_new_entity(
 
     observations = [
         {"category": obs.category, "content": obs.content,
-         "date": obs.date, "valence": obs.valence}
+         "date": obs.date, "valence": obs.valence, "tags": obs.tags}
         for obs in raw_entity.observations
     ]
 

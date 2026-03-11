@@ -161,9 +161,9 @@ def search_rag(query: str) -> dict:
         })
 
     # L2→L1 re-emergence: bump mention_dates for retrieved entities
+    # Scores are recalculated during `memory run` / `memory dream`, not per query.
     from datetime import date as date_type
     from src.memory.mentions import add_mention
-    from src.memory.scoring import recalculate_all_scores
 
     today = date_type.today().isoformat()
     promoted = False
@@ -179,7 +179,6 @@ def search_rag(query: str) -> dict:
             promoted = True
 
     if promoted:
-        graph = recalculate_all_scores(graph, config)
         save_graph(memory_path, graph)
 
     return {
