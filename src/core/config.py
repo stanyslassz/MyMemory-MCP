@@ -95,6 +95,16 @@ class NLPConfig:
 
 
 @dataclass
+class SearchConfig:
+    hybrid_enabled: bool = True
+    rrf_k: int = 60
+    weight_semantic: float = 0.5
+    weight_keyword: float = 0.3
+    weight_actr: float = 0.2
+    fts_db_path: str = "_memory_fts.db"
+
+
+@dataclass
 class Config:
     user_language: str = "fr"
     llm_extraction: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
@@ -120,6 +130,7 @@ class Config:
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
     nlp: NLPConfig = field(default_factory=NLPConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
     context_narrative: bool = False
     context_llm_sections: bool = False
     max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})
@@ -187,6 +198,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     feat = raw.get("features", {})
     ingest_cfg = raw.get("ingest", {})
     nlp_cfg = raw.get("nlp", {})
+    search_cfg = raw.get("search", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -262,5 +274,13 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             dedup_threshold=nlp_cfg.get("dedup_threshold", 0.85),
             date_extraction=nlp_cfg.get("date_extraction", True),
             pre_ner=nlp_cfg.get("pre_ner", True),
+        ),
+        search=SearchConfig(
+            hybrid_enabled=search_cfg.get("hybrid_enabled", True),
+            rrf_k=search_cfg.get("rrf_k", 60),
+            weight_semantic=search_cfg.get("weight_semantic", 0.5),
+            weight_keyword=search_cfg.get("weight_keyword", 0.3),
+            weight_actr=search_cfg.get("weight_actr", 0.2),
+            fts_db_path=search_cfg.get("fts_db_path", "_memory_fts.db"),
         ),
     )

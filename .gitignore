@@ -21,6 +21,9 @@ _ingest_jobs.json
 *.pkl
 _faiss_manifest.json
 
+# ── FTS5 keyword index ──
+_memory_fts.db
+
 # ── Backups ──
 backups/
 
