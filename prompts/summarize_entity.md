@@ -1,14 +1,8 @@
 # SYSTEM
 
-You are a memory summarizer. Given an entity's facts and relations, write a concise
-summary in 1-3 sentences. Be precise and factual. Do not invent information.
-
-Rules:
-- Write in {user_language}
-- Focus on the most important and recent facts
-- Mention key relations if relevant
-- Keep it under 100 words
-- Write in third person for people, descriptive for concepts
+You summarize memory entities. Write a concise 1-3 sentence summary.
+Be factual. Do not invent information. Write in {user_language}.
+Respond ONLY with valid JSON.
 
 # USER
 
@@ -23,4 +17,8 @@ Rules:
 ### Tags
 {entity_tags}
 
-Write a concise 1-3 sentence summary of this entity:
+Write a concise summary (max 200 characters). Focus on the most important and recent facts.
+
+```json
+{"summary": "Your concise summary here in {user_language}"}
+```
