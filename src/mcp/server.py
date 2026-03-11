@@ -1,16 +1,28 @@
-"""MCP Server: 3 tools — get_context, save_chat, search_rag."""
+"""MCP Server: 7 tools — get_context, save_chat, search_rag + CRUD tools."""
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 from collections import defaultdict
+from datetime import date as date_cls
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from src.core.config import load_config
-from src.memory.graph import load_graph, save_graph
-from src.memory.store import save_chat as store_save_chat
+from src.core.config import Config, load_config
+from src.core.models import GraphData
+from src.core.utils import slugify
+from src.memory.graph import load_graph, remove_relation, save_graph
+from src.memory.store import (
+    read_entity,
+    remove_relation_line,
+    save_chat as store_save_chat,
+    write_entity,
+    _parse_observation,
+    _format_observation,
+)
 from src.pipeline.indexer import search as faiss_search
 
 logger = logging.getLogger(__name__)
@@ -187,6 +199,277 @@ def search_rag(query: str) -> dict:
         "results": enriched_results,
         "total": len(enriched_results),
     }
+
+
+# ── Helper: resolve entity name → entity_id ────────────────
+
+
+def _resolve_entity_by_name(name: str, graph: GraphData) -> str | None:
+    """Resolve entity name to entity_id via slug, title, or alias match."""
+    slug = slugify(name)
+    if slug in graph.entities:
+        return slug
+    for eid, e in graph.entities.items():
+        if e.title.lower() == name.lower():
+            return eid
+    for eid, e in graph.entities.items():
+        if any(a.lower() == name.lower() for a in (e.aliases or [])):
+            return eid
+    return None
+
+
+# ── Tool implementations (sync, testable without MCP) ──────
+
+
+def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> str:
+    """Implementation for delete_fact. Returns JSON string."""
+    memory_path = config.memory_path
+    graph = load_graph(memory_path)
+    entity_id = _resolve_entity_by_name(entity_name, graph)
+    if not entity_id:
+        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+
+    entity = graph.entities[entity_id]
+    filepath = memory_path / entity.file
+    if not filepath.exists():
+        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+
+    frontmatter, sections = read_entity(filepath)
+    facts = sections.get("Facts", [])
+
+    # Find matching fact (case-insensitive substring match on content)
+    content_lower = fact_content.lower()
+    matched_idx = None
+    for i, line in enumerate(facts):
+        obs = _parse_observation(line)
+        if obs and content_lower in obs["content"].lower():
+            matched_idx = i
+            break
+
+    if matched_idx is None:
+        return json.dumps({"status": "error", "message": f"Fact containing '{fact_content}' not found in {entity.title}"})
+
+    deleted_line = facts.pop(matched_idx)
+    sections["Facts"] = facts
+
+    # Add history entry
+    today = date_cls.today().isoformat()
+    history = sections.get("History", [])
+    history.append(f"- {today}: Deleted fact: {fact_content[:60]}")
+    sections["History"] = history
+
+    write_entity(filepath, frontmatter, sections)
+
+    return json.dumps({
+        "status": "deleted",
+        "entity": entity.title,
+        "deleted_fact": deleted_line,
+    })
+
+
+def _delete_relation_impl(from_entity: str, to_entity: str, relation_type: str, config: Config) -> str:
+    """Implementation for delete_relation. Returns JSON string."""
+    memory_path = config.memory_path
+    graph = load_graph(memory_path)
+
+    from_id = _resolve_entity_by_name(from_entity, graph)
+    if not from_id:
+        return json.dumps({"status": "error", "message": f"Source entity '{from_entity}' not found"})
+
+    to_id = _resolve_entity_by_name(to_entity, graph)
+    if not to_id:
+        return json.dumps({"status": "error", "message": f"Target entity '{to_entity}' not found"})
+
+    # Remove from graph
+    removed = remove_relation(graph, from_id, to_id, relation_type)
+    if not removed:
+        return json.dumps({
+            "status": "error",
+            "message": f"Relation '{relation_type}' from '{from_entity}' to '{to_entity}' not found in graph",
+        })
+
+    # Remove from source entity MD file
+    from_entity_data = graph.entities[from_id]
+    from_path = memory_path / from_entity_data.file
+    to_entity_data = graph.entities[to_id]
+    if from_path.exists():
+        remove_relation_line(from_path, relation_type, to_entity_data.title)
+
+    save_graph(memory_path, graph)
+
+    return json.dumps({
+        "status": "deleted",
+        "from": from_entity_data.title,
+        "to": to_entity_data.title,
+        "type": relation_type,
+    })
+
+
+def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, config: Config) -> str:
+    """Implementation for modify_fact. Returns JSON string."""
+    memory_path = config.memory_path
+    graph = load_graph(memory_path)
+    entity_id = _resolve_entity_by_name(entity_name, graph)
+    if not entity_id:
+        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+
+    entity = graph.entities[entity_id]
+    filepath = memory_path / entity.file
+    if not filepath.exists():
+        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+
+    frontmatter, sections = read_entity(filepath)
+    facts = sections.get("Facts", [])
+
+    # Find matching fact
+    content_lower = old_content.lower()
+    matched_idx = None
+    for i, line in enumerate(facts):
+        obs = _parse_observation(line)
+        if obs and content_lower in obs["content"].lower():
+            matched_idx = i
+            break
+
+    if matched_idx is None:
+        return json.dumps({"status": "error", "message": f"Fact containing '{old_content}' not found in {entity.title}"})
+
+    # Parse the matched line to preserve metadata
+    old_line = facts[matched_idx]
+    obs = _parse_observation(old_line)
+    old_fact_content = obs["content"]
+    obs["content"] = new_content
+    new_line = _format_observation(obs)
+    facts[matched_idx] = new_line
+    sections["Facts"] = facts
+
+    # Add history entry
+    today = date_cls.today().isoformat()
+    history = sections.get("History", [])
+    history.append(f"- {today}: Modified fact: '{old_fact_content[:40]}' -> '{new_content[:40]}'")
+    sections["History"] = history
+
+    write_entity(filepath, frontmatter, sections)
+
+    return json.dumps({
+        "status": "modified",
+        "entity": entity.title,
+        "old_fact": old_line,
+        "new_fact": new_line,
+    })
+
+
+def _correct_entity_impl(entity_name: str, field: str, new_value: str, config: Config) -> str:
+    """Implementation for correct_entity. Returns JSON string."""
+    allowed_fields = {"title", "type", "aliases", "retention"}
+    if field not in allowed_fields:
+        return json.dumps({
+            "status": "error",
+            "message": f"Invalid field '{field}'. Allowed: {', '.join(sorted(allowed_fields))}",
+        })
+
+    memory_path = config.memory_path
+    graph = load_graph(memory_path)
+    entity_id = _resolve_entity_by_name(entity_name, graph)
+    if not entity_id:
+        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+
+    entity = graph.entities[entity_id]
+    filepath = memory_path / entity.file
+    if not filepath.exists():
+        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+
+    frontmatter, sections = read_entity(filepath)
+    old_value = getattr(frontmatter, field)
+    changes = {"field": field, "old": str(old_value), "new": new_value}
+
+    if field == "title":
+        frontmatter.title = new_value
+        entity.title = new_value
+    elif field == "type":
+        frontmatter.type = new_value
+        entity.type = new_value
+        # Move file to correct folder
+        new_folder = config.get_folder_for_type(new_value)
+        new_filepath = memory_path / new_folder / filepath.name
+        if new_filepath != filepath:
+            new_filepath.parent.mkdir(parents=True, exist_ok=True)
+            write_entity(filepath, frontmatter, sections)  # Save before move
+            shutil.move(str(filepath), str(new_filepath))
+            new_rel = str(new_filepath.relative_to(memory_path))
+            entity.file = new_rel
+            filepath = new_filepath  # Update for final write below
+            changes["moved_to"] = new_rel
+    elif field == "aliases":
+        aliases = [a.strip() for a in new_value.split(",") if a.strip()]
+        frontmatter.aliases = aliases
+        entity.aliases = aliases
+    elif field == "retention":
+        frontmatter.retention = new_value
+
+    # Add history entry
+    today = date_cls.today().isoformat()
+    history = sections.get("History", [])
+    history.append(f"- {today}: Corrected {field}: '{old_value}' -> '{new_value}'")
+    sections["History"] = history
+
+    write_entity(filepath, frontmatter, sections)
+    save_graph(memory_path, graph)
+
+    return json.dumps({"status": "updated", "entity": entity.title, "changes": changes})
+
+
+# ── MCP tool wrappers ───────────────────────────────────────
+
+
+@mcp.tool()
+def delete_fact(entity_name: str, fact_content: str) -> str:
+    """Delete a specific fact from an entity's memory.
+
+    Args:
+        entity_name: Name of the entity (title, slug, or alias)
+        fact_content: Content of the fact to delete (partial match supported)
+    """
+    config = _get_config()
+    return _delete_fact_impl(entity_name, fact_content, config)
+
+
+@mcp.tool()
+def delete_relation(from_entity: str, to_entity: str, relation_type: str) -> str:
+    """Delete a relation between two entities.
+
+    Args:
+        from_entity: Source entity name
+        to_entity: Target entity name
+        relation_type: Type of relation (affects, parent_of, friend_of, etc.)
+    """
+    config = _get_config()
+    return _delete_relation_impl(from_entity, to_entity, relation_type, config)
+
+
+@mcp.tool()
+def modify_fact(entity_name: str, old_content: str, new_content: str) -> str:
+    """Modify a fact's content while preserving its metadata (category, date, valence).
+
+    Args:
+        entity_name: Name of the entity
+        old_content: Content to find (partial match)
+        new_content: New content to replace with
+    """
+    config = _get_config()
+    return _modify_fact_impl(entity_name, old_content, new_content, config)
+
+
+@mcp.tool()
+def correct_entity(entity_name: str, field: str, new_value: str) -> str:
+    """Correct an entity's metadata (title, type, aliases, retention).
+
+    Args:
+        entity_name: Name of the entity
+        field: Field to correct (title, type, aliases, retention)
+        new_value: New value (for aliases, comma-separated list)
+    """
+    config = _get_config()
+    return _correct_entity_impl(entity_name, field, new_value, config)
 
 
 def run_server(config=None, transport_override: str | None = None):
