@@ -25,6 +25,8 @@ from src.memory.store import (
 )
 from src.pipeline.indexer import search as faiss_search
 
+from src.core.models import SearchResult
+
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("memory-ai")
@@ -88,6 +90,47 @@ def save_chat(messages: list[dict]) -> dict:
     return {"status": "saved", "file": str(rel_path)}
 
 
+def _rrf_fusion(
+    faiss_results: list[SearchResult],
+    keyword_results,
+    graph,
+    k: int = 60,
+    w_sem: float = 0.5,
+    w_kw: float = 0.3,
+    w_actr: float = 0.2,
+) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion combining semantic, keyword, and ACT-R signals.
+
+    Returns list of (entity_id, rrf_score) sorted descending.
+    """
+    sem_ranks = {r.entity_id: i + 1 for i, r in enumerate(faiss_results)}
+    kw_ranks = {r.entity_id: i + 1 for i, r in enumerate(keyword_results)}
+
+    all_ids = set(sem_ranks) | set(kw_ranks)
+
+    # ACT-R ranking
+    actr_scores = {}
+    for eid in all_ids:
+        e = graph.entities.get(eid)
+        actr_scores[eid] = e.score if e else 0.0
+    sorted_actr = sorted(actr_scores.items(), key=lambda x: x[1], reverse=True)
+    actr_ranks = {eid: i + 1 for i, (eid, _) in enumerate(sorted_actr)}
+
+    # Default rank for missing entries — penalises absent signals
+    default_rank = max(len(faiss_results), len(keyword_results), len(all_ids)) + 10
+
+    scored = []
+    for eid in all_ids:
+        sr = sem_ranks.get(eid, default_rank)
+        kr = kw_ranks.get(eid, default_rank)
+        ar = actr_ranks.get(eid, default_rank)
+
+        score = w_sem / (k + sr) + w_kw / (k + kr) + w_actr / (k + ar)
+        scored.append((eid, score))
+
+    return sorted(scored, key=lambda x: x[1], reverse=True)
+
+
 @mcp.tool()
 def search_rag(query: str) -> dict:
     """Semantic search across memory.
@@ -126,12 +169,55 @@ def search_rag(query: str) -> dict:
         ]
         return {"query": query, "results": enriched_results, "total": len(enriched_results)}
 
-    # Re-rank: combined FAISS similarity + graph score
-    for result in results:
-        entity = graph.entities.get(result.entity_id)
-        graph_score = entity.score if entity else 0.0
-        result.score = result.score * 0.6 + graph_score * 0.4
-    results.sort(key=lambda r: r.score, reverse=True)
+    # Hybrid re-ranking: RRF (semantic + keyword + ACT-R) when FTS index exists
+    fts_db_path = memory_path / config.search.fts_db_path
+    if config.search.hybrid_enabled and fts_db_path.exists():
+        from src.pipeline.keyword_index import search_keyword
+
+        kw_results = search_keyword(query, fts_db_path, top_k=config.faiss.top_k * 2)
+        if kw_results:
+            ranked = _rrf_fusion(
+                results,
+                kw_results,
+                graph,
+                k=config.search.rrf_k,
+                w_sem=config.search.weight_semantic,
+                w_kw=config.search.weight_keyword,
+                w_actr=config.search.weight_actr,
+            )
+            # Build lookup from existing FAISS results
+            result_map = {r.entity_id: r for r in results}
+            # Add keyword-only results (not found by FAISS)
+            for eid, _score in ranked:
+                if eid not in result_map and eid in graph.entities:
+                    e = graph.entities[eid]
+                    result_map[eid] = SearchResult(
+                        entity_id=eid,
+                        file=e.file,
+                        chunk="[keyword match]",
+                        score=0.0,
+                    )
+            reranked = []
+            for eid, rrf_score in ranked:
+                if eid in result_map:
+                    r = result_map[eid]
+                    r.score = rrf_score
+                    reranked.append(r)
+            results = reranked[: config.faiss.top_k]
+        else:
+            # No keyword matches — fall back to linear re-ranking
+            for result in results:
+                entity = graph.entities.get(result.entity_id)
+                graph_score = entity.score if entity else 0.0
+                result.score = result.score * 0.6 + graph_score * 0.4
+            results.sort(key=lambda r: r.score, reverse=True)
+    else:
+        # No FTS index or hybrid disabled — original linear re-ranking
+        for result in results:
+            entity = graph.entities.get(result.entity_id)
+            graph_score = entity.score if entity else 0.0
+            result.score = result.score * 0.6 + graph_score * 0.4
+        results.sort(key=lambda r: r.score, reverse=True)
 
     # Build adjacency dict once for O(1) per-entity relation lookup
     adjacency = defaultdict(list)

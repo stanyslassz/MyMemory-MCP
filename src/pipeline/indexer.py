@@ -204,7 +204,15 @@ def incremental_update(memory_path: Path, config: Config) -> dict:
     current_model = f"{config.embeddings.provider}/{config.embeddings.model}"
     if manifest.get("embedding_model") != current_model:
         logger.info("Embedding model changed, performing full rebuild")
-        return build_index(memory_path, config)
+        manifest = build_index(memory_path, config)
+        try:
+            from src.pipeline.keyword_index import build_keyword_index
+
+            fts_db_path = memory_path / config.search.fts_db_path
+            build_keyword_index(memory_path, fts_db_path)
+        except Exception:
+            logger.warning("Failed to build FTS5 keyword index", exc_info=True)
+        return manifest
 
     files = _get_entity_files(memory_path)
     changed_files = []
@@ -221,7 +229,18 @@ def incremental_update(memory_path: Path, config: Config) -> dict:
 
     # For simplicity in v1: full rebuild if anything changed
     # A true incremental update would selectively replace vectors
-    return build_index(memory_path, config)
+    manifest = build_index(memory_path, config)
+
+    # Rebuild FTS5 keyword index alongside FAISS
+    try:
+        from src.pipeline.keyword_index import build_keyword_index
+
+        fts_db_path = memory_path / config.search.fts_db_path
+        build_keyword_index(memory_path, fts_db_path)
+    except Exception:
+        logger.warning("Failed to build FTS5 keyword index", exc_info=True)
+
+    return manifest
 
 
 def search(query: str, config: Config, memory_path: Path, top_k: int | None = None) -> list[SearchResult]:
