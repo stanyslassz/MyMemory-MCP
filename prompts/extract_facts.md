@@ -7,13 +7,21 @@ Rules:
 - Only extract what is explicitly stated or strongly implied. Never invent.
 - Importance score: 0.1 = trivial, 0.5 = notable, 0.9 = critical (health, safety).
 - Allowed observation categories: {categories_observations}
+  (fact=general info, preference=likes/dislikes, diagnosis/treatment/progression=medical,
+   technique=methods, vigilance=warnings, decision=choices made, emotion=feelings,
+   skill=abilities, project=project info, context=situational, rule=user rules,
+   ai_style/user_reaction/interaction_rule=AI behavior preferences)
 - Allowed entity types: {categories_entity_types}
+  (person=other people, health=medical topics, work=job/career, project=projects,
+   interest=hobbies/topics, place=locations, animal=pets, organization=companies,
+   ai_self=AI personality)
 - Allowed relation types: {categories_relation_types}
 - Use entity names as they appear in the conversation.
 - All extracted content (entity names, observations, summaries) MUST be written
   in {user_language}. The conversation is in the user's language — preserve it.
-- If a date is mentioned or clearly deducible from context, include the "date" field
-  in YYYY-MM or YYYY-MM-DD format. Leave empty if no date is identifiable.
+- Today's date is {today}. Resolve relative dates ("yesterday", "last week", "2 months ago")
+  accordingly. Include the "date" field in YYYY-MM or YYYY-MM-DD format. Leave empty if no
+  date is identifiable.
 - For each observation, indicate emotional valence: "positive", "negative", or "neutral".
   Leave empty if uncertain or truly neutral.
 - If the user corrects or contradicts a previous statement ("actually not X",

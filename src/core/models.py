@@ -224,6 +224,10 @@ class FactConsolidation(BaseModel):
 
 # ── Dream mode planning ─────────────────────────────────────
 
+class EntitySummary(BaseModel):
+    summary: str = Field(max_length=200)
+
+
 class DreamPlan(BaseModel):
     steps: list[int] = Field(description="Ordered list of step numbers to execute (1-10)")
     reasoning: str = Field(description="Brief explanation of why these steps were chosen")
