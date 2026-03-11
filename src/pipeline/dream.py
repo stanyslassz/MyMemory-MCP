@@ -397,6 +397,61 @@ def _step_consolidate_facts(
             console.print(f"    [yellow]Skipped {eid}: {e}[/yellow]")
 
 
+def _find_faiss_dedup_candidates(
+    graph: GraphData,
+    memory_path: Path,
+    config: Config,
+    already_paired: set[tuple[str, str]],
+    similarity_threshold: float = 0.80,
+    max_candidates: int = 20,
+) -> list[tuple[str, str]]:
+    """Find potential duplicate entities via FAISS similarity search.
+
+    Returns pairs not already covered by deterministic matching.
+    These candidates require LLM confirmation before merging.
+    """
+    try:
+        from src.pipeline.indexer import search as faiss_search
+    except Exception:
+        return []
+
+    candidates: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set(already_paired)
+
+    for eid in list(graph.entities.keys()):
+        if len(candidates) >= max_candidates:
+            break
+        entity = graph.entities.get(eid)
+        if not entity:
+            continue
+
+        try:
+            results = faiss_search(entity.title, config, memory_path, top_k=5)
+        except Exception:
+            continue
+
+        for result in results:
+            if len(candidates) >= max_candidates:
+                break
+            other_id = result.entity_id
+            if other_id == eid or other_id not in graph.entities:
+                continue
+            other = graph.entities[other_id]
+            # Only consider same-type entities
+            if entity.type != other.type:
+                continue
+            # Check similarity threshold
+            if result.score < similarity_threshold:
+                continue
+            pair = tuple(sorted([eid, other_id]))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            candidates.append((eid, other_id))
+
+    return candidates
+
+
 def _step_merge_entities(
     graph: GraphData,
     memory_path: Path,
@@ -428,9 +483,16 @@ def _step_merge_entities(
                     merge_candidates.append((slug_a, slug_b))
                     seen_pairs.add(pair)
 
+    # Phase 2: FAISS-based candidate expansion with LLM confirmation
+    faiss_candidates = _find_faiss_dedup_candidates(graph, memory_path, config, seen_pairs)
+    merge_candidates.extend(faiss_candidates)
+
     if not merge_candidates:
         console.print("  No duplicate entities detected")
         return
+
+    # Track which pairs came from FAISS (need LLM confirmation)
+    faiss_pair_set = {tuple(sorted(p)) for p in faiss_candidates}
 
     for slug_a, slug_b in merge_candidates:
         entity_a = graph.entities.get(slug_a)
@@ -438,12 +500,40 @@ def _step_merge_entities(
         if not entity_a or not entity_b:
             continue
 
+        # FAISS-sourced candidates require LLM confirmation
+        pair_key = tuple(sorted([slug_a, slug_b]))
+        if pair_key in faiss_pair_set and not dry_run:
+            try:
+                from src.core.llm import call_dedup_check
+                dossier_a = _build_dossier(slug_a, entity_a, memory_path)
+                dossier_b = _build_dossier(slug_b, entity_b, memory_path)
+                verdict = call_dedup_check(
+                    entity_a.title, entity_a.type, dossier_a,
+                    entity_b.title, entity_b.type, dossier_b,
+                    config,
+                )
+                if not verdict.is_duplicate or verdict.confidence < 0.7:
+                    console.print(
+                        f"  [dim]LLM rejected merge: {entity_a.title} / {entity_b.title} "
+                        f"(confidence={verdict.confidence:.2f}, reason={verdict.reason})[/dim]"
+                    )
+                    continue
+                console.print(
+                    f"  [green]LLM confirmed duplicate: {entity_a.title} / {entity_b.title} "
+                    f"(confidence={verdict.confidence:.2f})[/green]"
+                )
+            except Exception as e:
+                report.errors.append(f"Dedup LLM check failed for {slug_a}/{slug_b}: {e}")
+                console.print(f"    [yellow]LLM dedup check failed, skipping: {e}[/yellow]")
+                continue
+
         keep, drop = (slug_a, slug_b) if entity_a.score >= entity_b.score else (slug_b, slug_a)
         keep_entity = graph.entities[keep]
         drop_entity = graph.entities[drop]
 
         if dry_run:
-            console.print(f"  [dim]Would merge '{drop_entity.title}' into '{keep_entity.title}'[/dim]")
+            source = "FAISS+LLM" if pair_key in faiss_pair_set else "deterministic"
+            console.print(f"  [dim]Would merge '{drop_entity.title}' into '{keep_entity.title}' ({source})[/dim]")
             report.entities_merged += 1
             continue
 

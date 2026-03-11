@@ -506,5 +506,67 @@ def graph(ctx):
     console.print(f"[green]Graph opened: {output}[/green]")
 
 
+@cli.command()
+@click.option("--last", default=20, help="Show last N actions")
+@click.option("--entity", default=None, help="Filter by entity name")
+@click.option("--action", "action_type", default=None, help="Filter by action type")
+@click.pass_context
+def actions(ctx, last, entity, action_type):
+    """Show centralized action history."""
+    import json as json_mod
+    from src.core.action_log import read_actions
+
+    config = ctx.obj["config"]
+    entries = read_actions(config.memory_path, entity_id=entity, action=action_type, last_n=last)
+    if not entries:
+        click.echo("No actions found.")
+        return
+    for e in entries:
+        ts = e.get("timestamp", "")[:19]
+        act = e.get("action", "")
+        eid = e.get("entity_id", "")
+        details = e.get("details", {})
+        click.echo(f"[{ts}] {act:15s} {eid:25s} {json_mod.dumps(details, ensure_ascii=False)}")
+
+
+@cli.command()
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.pass_context
+def insights(ctx, fmt):
+    """Show ACT-R cognitive insights about memory state."""
+    import json as json_mod
+    from src.memory.insights import compute_insights
+    from src.memory.graph import load_graph
+
+    config = ctx.obj["config"]
+    graph = load_graph(config.memory_path)
+    result = compute_insights(graph)
+
+    if fmt == "json":
+        click.echo(json_mod.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Entities: {result['total_entities']}  Relations: {result['total_relations']}")
+        click.echo(f"\nScore distribution:")
+        for bucket, count in result["scoring_distribution"].items():
+            bar = "█" * count
+            click.echo(f"  {bucket:8s} | {bar} ({count})")
+        if result["forgetting_curve"]:
+            click.echo(f"\nForgetting curve ({len(result['forgetting_curve'])} entities near threshold):")
+            for e in result["forgetting_curve"][:10]:
+                click.echo(f"  {e['title']:30s} score={e['score']}")
+        if result["emotional_hotspots"]:
+            click.echo(f"\nEmotional hotspots:")
+            for e in result["emotional_hotspots"][:10]:
+                click.echo(f"  {e['title']:30s} valence_ratio={e['ratio']}")
+        if result["weak_relations"]:
+            click.echo(f"\nWeak relations ({len(result['weak_relations'])}):")
+            for r in result["weak_relations"][:10]:
+                click.echo(f"  {r['from']} -> {r['type']} -> {r['to']}  strength={r['strength']}")
+        if result["network_hubs"]:
+            click.echo(f"\nNetwork hubs:")
+            for h in result["network_hubs"]:
+                click.echo(f"  {h['title']:30s} degree={h['degree']}")
+
+
 if __name__ == "__main__":
     cli()

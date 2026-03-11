@@ -232,3 +232,11 @@ class DreamPlan(BaseModel):
 class DreamValidation(BaseModel):
     approved: bool = Field(description="Whether the results look correct")
     issues: list[str] = Field(default_factory=list, description="List of issues found, if any")
+
+
+# ── Dream mode deduplication ──────────────────────────────
+
+class DedupVerdict(BaseModel):
+    is_duplicate: bool
+    confidence: float = Field(ge=0, le=1, default=0.5)
+    reason: str = ""
