@@ -181,12 +181,32 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
     return results
 
 
+def _dedup_facts_deterministic(facts: list[str], threshold: float = 0.85) -> list[str]:
+    """Remove near-duplicate facts using sequence similarity."""
+    from difflib import SequenceMatcher
+
+    kept = []
+    for fact in facts:
+        is_dup = False
+        for existing in kept:
+            ratio = SequenceMatcher(None, fact.lower(), existing.lower()).ratio()
+            if ratio >= threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            kept.append(fact)
+    return kept
+
+
 def consolidate_entity_facts(
     filepath: Path,
     config,
     max_facts: int | None = None,
 ) -> dict:
     """Consolidate redundant observations in an entity via LLM.
+
+    First applies deterministic Levenshtein dedup. If that reduces facts
+    below max_facts, skips the LLM call entirely.
 
     Returns a dict with 'original_count', 'consolidated_count', 'changes'.
     """
@@ -204,10 +224,44 @@ def consolidate_entity_facts(
     if len(live_facts) < 3:
         return {"original_count": len(live_facts), "consolidated_count": len(live_facts), "changes": []}
 
+    effective_max = max_facts if max_facts else 50
+
+    # Phase 1: Deterministic dedup (no LLM)
+    deduped_facts = _dedup_facts_deterministic(live_facts)
+
+    # If deterministic dedup brought us under max_facts, skip the LLM call
+    if len(deduped_facts) <= effective_max:
+        import logging
+        _logger = logging.getLogger(__name__)
+        _logger.info(
+            "Deterministic dedup sufficient for %s: %d → %d facts (max %d)",
+            frontmatter.title, len(live_facts), len(deduped_facts), effective_max,
+        )
+        changes = []
+        if len(deduped_facts) != len(live_facts):
+            changes.append(f"{len(live_facts)} → {len(deduped_facts)} live facts (deterministic dedup)")
+            sections["Facts"] = deduped_facts + superseded_facts
+
+            # Log in History
+            from datetime import date
+            history = sections.get("History", [])
+            history.append(f"- {date.today().isoformat()}: Facts deduped ({len(live_facts)} → {len(deduped_facts)}, deterministic)")
+            sections["History"] = history
+
+            write_entity(filepath, frontmatter, sections)
+
+        return {
+            "original_count": len(live_facts),
+            "consolidated_count": len(deduped_facts),
+            "changes": changes,
+        }
+
+    # Phase 2: Use deduped facts as input to LLM consolidation
+    live_facts = deduped_facts
+
     # Build indexed text for LLM
     indexed_text = "\n".join(f"{i}: {f}" for i, f in enumerate(live_facts))
 
-    effective_max = max_facts if max_facts else 50
     result = call_fact_consolidation(
         frontmatter.title, frontmatter.type, indexed_text, config,
         max_facts=effective_max,
