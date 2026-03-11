@@ -20,6 +20,42 @@ from src.memory.store import create_entity, create_stub_entity, update_entity, m
 from src.pipeline.resolver import slugify
 
 
+# Families of mutually exclusive relation types between the same entity pair.
+# When a new relation of type X is added, any existing relation of a
+# conflicting type Y (in the same family) is automatically removed.
+EXCLUSIVE_RELATIONS: list[set[str]] = [
+    {"parent_of", "friend_of"},
+    {"improves", "worsens"},
+]
+
+
+def _check_relation_conflicts(
+    graph, from_entity: str, to_entity: str, new_type: str, memory_path: Path,
+) -> None:
+    """Auto-remove relations that contradict new_type between the same pair."""
+    for family in EXCLUSIVE_RELATIONS:
+        if new_type in family:
+            for conflicting_type in family - {new_type}:
+                # Check both directions
+                if remove_relation(graph, from_entity, to_entity, conflicting_type):
+                    entity_data = graph.entities.get(from_entity)
+                    if entity_data:
+                        to_data = graph.entities.get(to_entity)
+                        if to_data:
+                            entity_file = memory_path / entity_data.file
+                            if entity_file.exists():
+                                remove_relation_line(entity_file, conflicting_type, to_data.title)
+                if remove_relation(graph, to_entity, from_entity, conflicting_type):
+                    entity_data = graph.entities.get(to_entity)
+                    if entity_data:
+                        from_data = graph.entities.get(from_entity)
+                        if from_data:
+                            entity_file = memory_path / entity_data.file
+                            if entity_file.exists():
+                                remove_relation_line(entity_file, conflicting_type, from_data.title)
+            break
+
+
 def enrich_memory(
     resolved: ResolvedExtraction,
     config: Config,
@@ -98,6 +134,7 @@ def enrich_memory(
 
                 graph_rel = GraphRelation(from_entity=from_slug, to_entity=to_slug, type=rel.type, context=rel.context)
                 graph = add_relation(graph, graph_rel, strength_growth=config.scoring.relation_strength_growth)
+                _check_relation_conflicts(graph, from_slug, to_slug, rel.type, memory_path)
                 report.relations_added += 1
 
                 # Also add relation text to the source entity MD

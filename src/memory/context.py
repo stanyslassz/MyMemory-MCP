@@ -176,9 +176,250 @@ def _sort_by_cluster(
     return sorted(entities, key=lambda x: (cluster_first_idx.get(cluster_map.get(x[0], 0), 0), original_pos.get(x[0], 0)))
 
 
+# ── Natural context helpers ──────────────────────────────────
+
+RELATION_NATURAL = {
+    "parent_of": "parent de",
+    "lives_with": "vit avec",
+    "works_at": "travaille chez",
+    "friend_of": "ami(e) de",
+    "affects": "lié à",
+    "improves": "amélioré par",
+    "worsens": "aggravé par",
+    "uses": "utilise",
+    "part_of": "fait partie de",
+    "linked_to": "lié à",
+    "requires": "nécessite",
+    "contrasts_with": "contraste avec",
+    "precedes": "précède",
+}
+
+
+def _read_entity_facts(eid: str, entity: GraphEntity, memory_path: Path) -> list[str]:
+    """Read facts from an entity's MD file."""
+    entity_path = (memory_path / entity.file).resolve()
+    if not entity_path.exists() or not entity_path.is_relative_to(memory_path.resolve()):
+        return []
+    try:
+        _, sections = read_entity(entity_path)
+        return sections.get("Facts", [])
+    except Exception:
+        return []
+
+
+def _select_entities_for_natural(
+    all_top: list[tuple[str, GraphEntity]], graph: GraphData,
+) -> list[tuple[str, GraphEntity]]:
+    """Filter entities for natural context: personal memory over transient topics."""
+    selected = []
+    for eid, entity in all_top:
+        # Always include: identity, health, people, animals, ai_self
+        if entity.type in ("person", "health", "animal", "ai_self"):
+            selected.append((eid, entity))
+            continue
+        # Work/org/project: only if mentioned 2+ times or high score
+        if entity.type in ("work", "organization", "project"):
+            if entity.frequency >= 2 or entity.score >= 0.5:
+                selected.append((eid, entity))
+            continue
+        # Interests/places: only if long_term or high frequency
+        if entity.type in ("interest", "place"):
+            if entity.retention == "long_term" or entity.frequency >= 3:
+                selected.append((eid, entity))
+            continue
+        # Rest: only if permanent or very high score
+        if entity.retention == "permanent" or entity.score >= 0.6:
+            selected.append((eid, entity))
+    return selected
+
+
+def _classify_temporal(entity: GraphEntity, today: date) -> str:
+    """Classify entity into 'long_terme', 'moyen_terme', or 'court_terme'."""
+    last = date.fromisoformat(entity.last_mentioned) if entity.last_mentioned else None
+    if not last:
+        return "long_terme"
+    days_since = (today - last).days
+
+    # Stable entities (people, animals with long history) → always long term
+    is_stable = (
+        entity.type in ("person", "animal")
+        and entity.retention in ("long_term", "permanent")
+        and entity.frequency >= 5
+    )
+    if is_stable:
+        return "long_terme"
+
+    if days_since <= 7:
+        return "court_terme"
+    elif days_since <= 30:
+        return "moyen_terme"
+    else:
+        return "long_terme"
+
+
+def _build_natural_bullet(
+    eid: str, entity: GraphEntity, graph: GraphData, memory_path: Path,
+) -> str:
+    """Build a natural language bullet point for an entity."""
+    # 1. Base: summary or most recent/important fact
+    if entity.summary:
+        base = entity.summary
+    else:
+        facts = _read_entity_facts(eid, entity, memory_path)
+        facts = [f for f in facts if "[superseded]" not in f]
+        if facts:
+            # Take the last fact (most recently added), clean markers
+            obs = _parse_observation(facts[-1])
+            base = obs["content"] if obs else facts[-1].lstrip("- ")
+        else:
+            base = entity.title
+
+    # 2. Integrate key relations (max 2)
+    rel_parts = []
+    for rel in graph.relations:
+        if rel.strength < 0.3:
+            continue
+        if rel.from_entity == eid:
+            target = graph.entities.get(rel.to_entity)
+            if target and rel.type in RELATION_NATURAL:
+                rel_parts.append(f"{RELATION_NATURAL[rel.type]} {target.title}")
+        elif rel.to_entity == eid:
+            source = graph.entities.get(rel.from_entity)
+            if source and rel.type in RELATION_NATURAL:
+                rel_parts.append(f"{RELATION_NATURAL[rel.type]} {source.title}")
+
+    # 3. Assemble
+    bullet = f"- {base}"
+    if rel_parts:
+        bullet += f" ({', '.join(rel_parts[:2])})"
+    return bullet
+
+
+def _extract_vigilances(
+    all_selected: list[tuple[str, GraphEntity]],
+    graph: GraphData,
+    memory_path: Path,
+) -> list[str]:
+    """Extract vigilance/diagnosis/treatment items as natural bullets."""
+    vigilances = []
+    for eid, entity in all_selected:
+        facts = _read_entity_facts(eid, entity, memory_path)
+        for f in facts:
+            obs = _parse_observation(f)
+            if obs and obs["category"] in ("vigilance", "diagnosis", "treatment"):
+                if obs.get("valence") == "negative" or obs["category"] == "vigilance":
+                    vigilances.append(f"- {entity.title}: {obs['content']}")
+    # Dedup by content
+    seen: set[str] = set()
+    unique = []
+    for v in vigilances:
+        key = v.lower().strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(v)
+    return unique[:15]
+
+
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: words * 1.3. Delegates to shared util."""
     return _estimate_tokens_util(text)
+
+
+def _enrich_entity_natural(
+    entity_id: str, entity: GraphEntity, graph: GraphData, memory_path: Path,
+) -> str:
+    """Build a compact enriched dossier for LLM natural context generation.
+
+    Unlike _enrich_entity(), this omits scores/retention headers and caps
+    relations at 3 (strongest only) for cleaner LLM input.
+    """
+    entity_path = (memory_path / entity.file).resolve()
+    facts: list[str] = []
+    if entity_path.is_relative_to(memory_path.resolve()) and entity_path.exists():
+        try:
+            _, sections = read_entity(entity_path)
+            facts = sections.get("Facts", [])
+        except Exception:
+            pass
+
+    lines = [f"### {entity.title} [{entity.type}]"]
+    if entity.summary:
+        lines.append(f"Résumé: {entity.summary}")
+    if facts:
+        facts = [f for f in facts if "[superseded]" not in f]
+        facts = _deduplicate_facts_for_context(facts, max_per_category=3)
+        for f in facts:
+            lines.append(f"  {f}")
+
+    # Max 3 strongest relations
+    entity_rels: list[tuple[float, str]] = []
+    for rel in graph.relations:
+        if rel.strength < 0.3:
+            continue
+        if rel.from_entity == entity_id:
+            target = graph.entities.get(rel.to_entity)
+            if target:
+                entity_rels.append((rel.strength, f"→ {rel.type} {target.title}"))
+        elif rel.to_entity == entity_id:
+            source = graph.entities.get(rel.from_entity)
+            if source:
+                entity_rels.append((rel.strength, f"← {rel.type} {source.title}"))
+    entity_rels.sort(key=lambda x: x[0], reverse=True)
+    for _, line in entity_rels[:3]:
+        lines.append(f"  {line}")
+
+    return "\n".join(lines)
+
+
+def _build_section_llm(
+    section_name: str,
+    entities: list[tuple[str, GraphEntity]],
+    graph: GraphData,
+    memory_path: Path,
+    config: Config,
+    section_budget: int,
+) -> str:
+    """Build a section using LLM to generate natural narrative."""
+    import logging as _logging
+
+    if not entities:
+        return ""
+
+    # Build enriched dossier
+    dossier_parts = []
+    for eid, entity in entities:
+        dossier_parts.append(_enrich_entity_natural(eid, entity, graph, memory_path))
+    raw_dossier = "\n\n".join(dossier_parts)
+
+    # RAG pre-fetch
+    rag_text = _rag_prefetch([eid for eid, _ in entities], graph, config, memory_path)
+
+    # LLM call with fallback
+    try:
+        from src.core.llm import call_natural_context_section
+        result = call_natural_context_section(
+            section_name=section_name,
+            entities_dossier=raw_dossier,
+            rag_context=rag_text,
+            budget_tokens=section_budget,
+            config=config,
+        )
+        if result.strip():
+            return result
+    except Exception as e:
+        _logging.getLogger(__name__).warning("LLM natural section '%s' failed: %s", section_name, e)
+
+    # Deterministic fallback
+    lines = []
+    used = 0
+    for eid, entity in entities:
+        bullet = _build_natural_bullet(eid, entity, graph, memory_path)
+        cost = _estimate_tokens(bullet)
+        if used + cost > section_budget and lines:
+            break
+        lines.append(bullet)
+        used += cost
+    return "\n".join(lines)
 
 
 def _enrich_entity(
@@ -273,6 +514,130 @@ def _collect_section(
         parts.append(dossier)
         used += cost
     return "\n\n".join(parts)
+
+
+def build_natural_context(
+    graph: GraphData, memory_path: Path, config: Config,
+    *, use_llm: bool = False,
+) -> str:
+    """Build _context.md in natural Claude Chat-like format.
+
+    When use_llm=True, each section is processed by the LLM for narrative
+    quality, with deterministic fallback on failure.
+    """
+    today = date.today()
+    today_str = today.isoformat()
+
+    # Template
+    template_path = config.prompts_path / "context_natural.md"
+    if template_path.exists():
+        template = template_path.read_text(encoding="utf-8")
+    else:
+        template = (
+            "# Mémoire Personnelle — {date}\n\n{ai_personality}\n\n---\n\n"
+            "{sections}\n\n---\n\n{available_entities}\n\n{extended_memory}\n\n{custom_instructions}"
+        )
+
+    # Custom instructions
+    instructions_path = config.prompts_path / "context_instructions.md"
+    custom_instructions = ""
+    if instructions_path.exists():
+        custom_instructions = instructions_path.read_text(encoding="utf-8")
+
+    # Budget
+    reserved = 400
+    total_budget = max(config.context_max_tokens - reserved, 1000)
+    budget = config.context_budget or {}
+
+    # Entities
+    min_score = config.scoring.min_score_for_context
+    all_top = get_top_entities(graph, n=50, include_permanent=True, min_score=min_score)
+    selected = _select_entities_for_natural(all_top, graph)
+
+    # AI Personality
+    ai_parts = []
+    for eid, e in selected:
+        if e.type == "ai_self":
+            ai_parts.append(_build_natural_bullet(eid, e, graph, memory_path))
+    ai_personality = "\n".join(ai_parts) if ai_parts else ""
+
+    # Classify temporally (excluding ai_self)
+    long_terme: list[tuple[str, GraphEntity]] = []
+    moyen_terme: list[tuple[str, GraphEntity]] = []
+    court_terme: list[tuple[str, GraphEntity]] = []
+    for eid, entity in selected:
+        if entity.type == "ai_self":
+            continue
+        tier = _classify_temporal(entity, today)
+        if tier == "long_terme":
+            long_terme.append((eid, entity))
+        elif tier == "moyen_terme":
+            moyen_terme.append((eid, entity))
+        else:
+            court_terme.append((eid, entity))
+
+    # Build sections with token budget
+    def build_section(entities: list[tuple[str, GraphEntity]], budget_key: str, default_pct: int = 25, section_label: str = "") -> str:
+        pct = budget.get(budget_key, default_pct)
+        sb = int(total_budget * pct / 100)
+        if use_llm:
+            return _build_section_llm(section_label or budget_key, entities, graph, memory_path, config, sb)
+        lines = []
+        used = 0
+        for eid, entity in entities:
+            bullet = _build_natural_bullet(eid, entity, graph, memory_path)
+            cost = _estimate_tokens(bullet)
+            if used + cost > sb and lines:
+                break
+            lines.append(bullet)
+            used += cost
+        return "\n".join(lines)
+
+    long_text = build_section(long_terme, "long_terme", 35, "Identité & long terme")
+    moyen_text = build_section(moyen_terme, "moyen_terme", 25, "En ce moment")
+    court_text = build_section(court_terme, "court_terme", 20, "Cette semaine")
+
+    # Vigilances
+    vigilances = _extract_vigilances(selected, graph, memory_path)
+    vigilance_text = "\n".join(vigilances)
+
+    # Assemble sections
+    sections_parts = []
+    if long_text:
+        sections_parts.append(f"## Identité & long terme\n\n{long_text}")
+    if moyen_text:
+        sections_parts.append(f"## En ce moment\n\n{moyen_text}")
+    if court_text:
+        sections_parts.append(f"## Cette semaine\n\n{court_text}")
+    if vigilance_text:
+        sections_parts.append(f"## Points de vigilance\n\n{vigilance_text}")
+
+    # Available entities (not shown in detail)
+    shown_ids = {eid for eid, _ in selected}
+    remaining = sorted(
+        [(eid, graph.entities[eid]) for eid in graph.entities if eid not in shown_ids],
+        key=lambda x: x[1].score,
+        reverse=True,
+    )[:30]
+    available_text = (
+        "Autres sujets en mémoire : " + ", ".join(e.title for _, e in remaining)
+        if remaining
+        else ""
+    )
+
+    extended = "Pour plus de détails sur un sujet, utilise l'outil `search_rag`."
+
+    # Assemble template
+    result = template
+    result = result.replace("{date}", today_str)
+    result = result.replace("{user_language_name}", config.user_language_name)
+    result = result.replace("{ai_personality}", ai_personality)
+    result = result.replace("{sections}", "\n\n".join(sections_parts))
+    result = result.replace("{available_entities}", available_text)
+    result = result.replace("{extended_memory}", extended)
+    result = result.replace("{custom_instructions}", custom_instructions)
+
+    return result
 
 
 def build_context(

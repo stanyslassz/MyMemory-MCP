@@ -274,11 +274,10 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
     chats = list_unprocessed_chats(memory_path)
     if not chats:
         console.print("[yellow]No pending chats to process.[/yellow]")
-        return
-
-    max_chats = config.job_max_chats_per_run
-    chats = chats[:max_chats]
-    console.print(f"[bold]Processing {len(chats)} pending chat(s)...[/bold]")
+    else:
+        max_chats = config.job_max_chats_per_run
+        chats = chats[:max_chats]
+        console.print(f"[bold]Processing {len(chats)} pending chat(s)...[/bold]")
 
     all_touched_ids: list[str] = []
 
@@ -380,7 +379,13 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
     try:
         graph = load_graph(memory_path)
         use_llm = consolidate and getattr(config, "context_llm_sections", False)
-        if use_llm:
+        if getattr(config, "context_format", "structured") == "natural":
+            use_natural_llm = consolidate and getattr(config, "context_llm_sections", False)
+            label = "natural + LLM" if use_natural_llm else "natural"
+            console.print(f"\n[bold]Generating context ({label})...[/bold]")
+            from src.memory.context import build_natural_context
+            context_text = build_natural_context(graph, memory_path, config, use_llm=use_natural_llm)
+        elif use_llm:
             console.print("\n[bold]Generating context (LLM per-section)...[/bold]")
             from src.memory.context import build_context_with_llm
             context_text = build_context_with_llm(graph, memory_path, config)

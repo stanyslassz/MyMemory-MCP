@@ -91,7 +91,7 @@ def rebuild_all(ctx):
     """Rebuild graph + context + FAISS."""
     config = ctx.obj["config"]
     from src.memory.graph import rebuild_from_md, save_graph
-    from src.memory.context import build_context, write_context, write_index
+    from src.memory.context import build_context, build_natural_context, write_context, write_index
     from src.memory.scoring import recalculate_all_scores
     from src.pipeline.indexer import build_index
 
@@ -120,8 +120,11 @@ def rebuild_all(ctx):
     write_index(config.memory_path, graph)
     console.print("  _index.md updated")
 
-    # Context (deterministic template)
-    context_text = build_context(graph, config.memory_path, config)
+    # Context
+    if getattr(config, "context_format", "structured") == "natural":
+        context_text = build_natural_context(graph, config.memory_path, config)
+    else:
+        context_text = build_context(graph, config.memory_path, config)
     if context_text.strip():
         write_context(config.memory_path, context_text)
         console.print("  _context.md updated")
@@ -478,7 +481,7 @@ def context(ctx):
     """Rebuild _context.md from current graph (no extraction, no LLM)."""
     config = ctx.obj["config"]
     from src.memory.graph import load_graph, save_graph
-    from src.memory.context import build_context, write_context, write_index
+    from src.memory.context import build_context, build_natural_context, write_context, write_index
     from src.memory.scoring import recalculate_all_scores
 
     console.print("[bold]Rebuilding context...[/bold]")
@@ -486,7 +489,10 @@ def context(ctx):
     graph = recalculate_all_scores(graph, config)
     save_graph(config.memory_path, graph)
 
-    context_text = build_context(graph, config.memory_path, config)
+    if getattr(config, "context_format", "structured") == "natural":
+        context_text = build_natural_context(graph, config.memory_path, config)
+    else:
+        context_text = build_context(graph, config.memory_path, config)
     if context_text.strip():
         write_context(config.memory_path, context_text)
     write_index(config.memory_path, graph)

@@ -1051,13 +1051,16 @@ def _step_rebuild(
     console: Console,
 ) -> None:
     """Step 10: Rebuild context and FAISS index."""
-    from src.memory.context import build_context, write_context, write_index
+    from src.memory.context import build_context, build_natural_context, write_context, write_index
     from src.memory.graph import save_graph
     from src.pipeline.indexer import build_index
 
     save_graph(memory_path, graph)
 
-    context_text = build_context(graph, memory_path, config)
+    if getattr(config, "context_format", "structured") == "natural":
+        context_text = build_natural_context(graph, memory_path, config)
+    else:
+        context_text = build_context(graph, memory_path, config)
     if context_text.strip():
         write_context(memory_path, context_text)
         console.print("  [green]_context.md updated[/green]")

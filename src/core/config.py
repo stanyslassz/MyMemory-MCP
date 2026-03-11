@@ -133,6 +133,7 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     context_narrative: bool = False
     context_llm_sections: bool = False
+    context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
     max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})
 
     @property
@@ -222,6 +223,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         context_budget=mem.get("context_budget", {}),
         context_narrative=mem.get("context_narrative", False),
         context_llm_sections=mem.get("context_llm_sections", False),
+        context_format=mem.get("context_format", "structured"),
         max_facts=raw.get("max_facts", {"default": 50, "ai_self": 20}),
         scoring=ScoringConfig(
             model=scoring.get("model", "act_r"),
