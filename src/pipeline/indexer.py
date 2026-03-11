@@ -22,8 +22,19 @@ _embedding_model = None
 _embedding_model_name = None
 
 
+def _normalize_l2(vectors: np.ndarray) -> np.ndarray:
+    """L2-normalize vectors for cosine similarity with IndexFlatIP."""
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    return (vectors / norms).astype(np.float32)
+
+
 def _get_embedding_fn(config: Config):
-    """Get an embedding function based on config."""
+    """Get an embedding function based on config.
+
+    All providers return L2-normalized vectors so that FAISS IndexFlatIP
+    computes cosine similarity correctly.
+    """
     global _embedding_model, _embedding_model_name
 
     provider = config.embeddings.provider
@@ -36,7 +47,8 @@ def _get_embedding_fn(config: Config):
             _embedding_model_name = model_name
 
         def embed(texts: list[str]) -> np.ndarray:
-            return _embedding_model.encode(texts, normalize_embeddings=True)
+            vecs = _embedding_model.encode(texts, normalize_embeddings=True)
+            return _normalize_l2(np.asarray(vecs, dtype=np.float32))
 
         return embed
 
@@ -49,7 +61,8 @@ def _get_embedding_fn(config: Config):
                 input=texts,
                 api_base=config.embeddings.api_base or "http://localhost:11434",
             )
-            return np.array([d["embedding"] for d in response.data], dtype=np.float32)
+            vecs = np.array([d["embedding"] for d in response.data], dtype=np.float32)
+            return _normalize_l2(vecs)
 
         return embed
 
@@ -61,7 +74,8 @@ def _get_embedding_fn(config: Config):
             if config.embeddings.api_base:
                 kwargs["api_base"] = config.embeddings.api_base
             response = litellm.embedding(**kwargs)
-            return np.array([d["embedding"] for d in response.data], dtype=np.float32)
+            vecs = np.array([d["embedding"] for d in response.data], dtype=np.float32)
+            return _normalize_l2(vecs)
 
         return embed
 
