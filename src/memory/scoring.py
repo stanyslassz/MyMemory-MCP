@@ -154,6 +154,14 @@ def spreading_activation(
         adjacency[rel.to_entity].append((rel.from_entity, effective_strength))
         adjacency[rel.from_entity].append((rel.to_entity, effective_strength))
 
+    # Cap neighbors to top-N by effective strength to prevent hub dilution
+    max_neighbors = config.scoring.max_spreading_neighbors
+    for eid in adjacency:
+        neighbors = adjacency[eid]
+        if len(neighbors) > max_neighbors:
+            neighbors.sort(key=lambda x: x[1], reverse=True)
+            adjacency[eid] = neighbors[:max_neighbors]
+
     # Second pass: compute spreading bonus
     spreading: dict[str, float] = {}
     for eid in graph.entities:

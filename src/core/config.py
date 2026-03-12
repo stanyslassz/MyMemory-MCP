@@ -55,6 +55,7 @@ class ScoringConfig:
     emotional_boost_weight: float = 0.15
     window_size: int = 50
     min_score_for_context: float = 0.3
+    max_spreading_neighbors: int = 10
 
 
 @dataclass
@@ -241,6 +242,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             emotional_boost_weight=scoring.get("emotional_boost_weight", 0.15),
             window_size=scoring.get("window_size", 50),
             min_score_for_context=scoring.get("min_score_for_context", 0.3),
+            max_spreading_neighbors=scoring.get("max_spreading_neighbors", 10),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),
