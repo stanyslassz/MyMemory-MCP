@@ -410,3 +410,124 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
         console.print(f"  [yellow]FAISS indexing warning: {e}[/yellow]")
 
     console.print("\n[bold green]✓ Pipeline complete[/bold green]")
+
+
+# ------------------------------------------------------------------
+# Deterministic relation discovery (full scan / single entity)
+# ------------------------------------------------------------------
+
+def discover_relations_deterministic(config, memory_path, console, *, entity_filter=None, dry_run=False) -> int:
+    """Discover relations using FAISS + tag overlap + co-occurrence. Zero LLM.
+
+    Pass 1: FAISS + tag overlap per entity
+    Pass 2: Co-occurrence from processed chats
+    """
+    from src.pipeline.indexer import search as faiss_search
+    from src.memory.graph import load_graph, add_relation, save_graph
+    from src.memory.scoring import recalculate_all_scores
+    from src.core.models import GraphRelation
+
+    graph = load_graph(memory_path)
+
+    # Build existing relation lookup
+    existing = set()
+    for rel in graph.relations:
+        existing.add((rel.from_entity, rel.to_entity))
+        existing.add((rel.to_entity, rel.from_entity))
+
+    entity_ids = [entity_filter] if entity_filter and entity_filter in graph.entities else list(graph.entities.keys())
+    discovered = 0
+
+    # Pass 1: FAISS + tag overlap
+    for eid in entity_ids:
+        entity = graph.entities.get(eid)
+        if not entity:
+            continue
+        try:
+            results = faiss_search(entity.title, config, memory_path, top_k=5)
+        except Exception:
+            continue
+        for result in results:
+            other_id = result.entity_id
+            if other_id == eid or other_id not in graph.entities:
+                continue
+            if (eid, other_id) in existing:
+                # Reinforce existing (Hebbian)
+                continue
+            other = graph.entities[other_id]
+            shared_tags = set(entity.tags or []) & set(other.tags or [])
+
+            should_link = False
+            context_reason = ""
+            if len(shared_tags) >= 2 and result.score >= 0.75:
+                should_link = True
+                context_reason = f"tag overlap ({', '.join(sorted(shared_tags))}) + FAISS {result.score:.2f}"
+            elif result.score >= 0.80 and entity.type == other.type:
+                should_link = True
+                context_reason = f"same type ({entity.type}) + FAISS {result.score:.2f}"
+
+            if should_link:
+                if dry_run:
+                    console.print(f"  [dim]Would link: {entity.title} <-> {other.title} ({context_reason})[/dim]")
+                else:
+                    new_rel = GraphRelation(
+                        from_entity=eid, to_entity=other_id,
+                        type="linked_to", context=context_reason,
+                    )
+                    add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
+                existing.add((eid, other_id))
+                existing.add((other_id, eid))
+                discovered += 1
+
+    # Pass 2: Co-occurrence from processed chats
+    import yaml
+    chats_dir = memory_path / "chats"
+    if chats_dir.exists() and not entity_filter:
+        co_occurrence: dict[tuple[str, str], int] = {}
+        for chat_file in sorted(chats_dir.glob("*.md")):
+            try:
+                text = chat_file.read_text(encoding="utf-8")
+                if not text.startswith("---"):
+                    continue
+                parts = text.split("---", 2)
+                if len(parts) < 3:
+                    continue
+                fm = yaml.safe_load(parts[1]) or {}
+                if not fm.get("processed"):
+                    continue
+                entities_in_chat = set(fm.get("entities_updated", []) + fm.get("entities_created", []))
+                entities_list = sorted(entities_in_chat)
+                for i, a in enumerate(entities_list):
+                    for b in entities_list[i+1:]:
+                        pair = tuple(sorted([a, b]))
+                        co_occurrence[pair] = co_occurrence.get(pair, 0) + 1
+            except Exception:
+                continue
+
+        for (a, b), count in co_occurrence.items():
+            if count < 2:
+                continue
+            if (a, b) in existing:
+                continue
+            if a not in graph.entities or b not in graph.entities:
+                continue
+            ea = graph.entities[a]
+            eb = graph.entities[b]
+            if dry_run:
+                console.print(f"  [dim]Would link (co-occurrence x{count}): {ea.title} <-> {eb.title}[/dim]")
+            else:
+                new_rel = GraphRelation(
+                    from_entity=a, to_entity=b,
+                    type="linked_to",
+                    context=f"co-mentioned in {count} conversations",
+                )
+                add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
+            existing.add((a, b))
+            existing.add((b, a))
+            discovered += 1
+
+    if discovered and not dry_run:
+        graph = recalculate_all_scores(graph, config)
+        save_graph(memory_path, graph)
+
+    return discovered

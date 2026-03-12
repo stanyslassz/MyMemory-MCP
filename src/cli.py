@@ -214,39 +214,47 @@ def inbox(ctx):
 @cli.command()
 @click.option("--all", "clean_all", is_flag=True, help="Remove all generated artifacts and caches")
 @click.option("--artifacts", is_flag=True, help="Remove generated artifacts (_context.md, _index.md, FAISS, graph)")
+@click.option("--full", is_flag=True, help="Everything in --all + reset chats to unprocessed")
+@click.option("--chats", "reset_chats", is_flag=True, help="Only reset chats to unprocessed")
 @click.option("--dry-run", is_flag=True, help="Show what would be removed without deleting")
 @click.pass_context
-def clean(ctx, clean_all, artifacts, dry_run):
+def clean(ctx, clean_all, artifacts, full, reset_chats, dry_run):
     """Remove generated files and caches. Backs up before destructive operations."""
     import shutil
     import tarfile
+    import yaml
     from datetime import datetime
 
     config = ctx.obj["config"]
     memory_path = config.memory_path
 
+    # --full implies --all
+    if full:
+        clean_all = True
+
     # Determine what to clean
-    if not clean_all and not artifacts:
-        console.print("[yellow]Specify --all or --artifacts. Use --dry-run to preview.[/yellow]")
+    if not clean_all and not artifacts and not full and not reset_chats:
+        console.print("[yellow]Specify --all, --artifacts, --full, or --chats. Use --dry-run to preview.[/yellow]")
         return
 
     targets: list[tuple[Path, str]] = []
 
     # Artifact targets (always included with --artifacts or --all)
-    artifact_files = [
-        (memory_path / "_context.md", "generated context"),
-        (memory_path / "_index.md", "generated index"),
-        (memory_path / "_graph.json", "entity graph"),
-        (memory_path / "_graph.json.bak", "graph backup"),
-        (memory_path / "_graph.lock", "graph lockfile"),
-        (Path(config.faiss.index_path), "FAISS index"),
-        (Path(config.faiss.mapping_path), "FAISS mapping"),
-        (Path(config.faiss.manifest_path), "FAISS manifest"),
-        (Path(config.ingest.jobs_path), "ingest jobs"),
-    ]
-    for path, desc in artifact_files:
-        if path.exists():
-            targets.append((path, desc))
+    if clean_all or artifacts:
+        artifact_files = [
+            (memory_path / "_context.md", "generated context"),
+            (memory_path / "_index.md", "generated index"),
+            (memory_path / "_graph.json", "entity graph"),
+            (memory_path / "_graph.json.bak", "graph backup"),
+            (memory_path / "_graph.lock", "graph lockfile"),
+            (Path(config.faiss.index_path), "FAISS index"),
+            (Path(config.faiss.mapping_path), "FAISS mapping"),
+            (Path(config.faiss.manifest_path), "FAISS manifest"),
+            (Path(config.ingest.jobs_path), "ingest jobs"),
+        ]
+        for path, desc in artifact_files:
+            if path.exists():
+                targets.append((path, desc))
 
     # Extended targets for --all
     if clean_all:
@@ -257,49 +265,100 @@ def clean(ctx, clean_all, artifacts, dry_run):
         if processed_dir.exists():
             targets.append((processed_dir, "processed inbox archive"))
 
-    if not targets:
-        console.print("[green]Nothing to clean.[/green]")
-        return
+    if targets:
+        # Preview
+        console.print(f"[bold]{'[DRY RUN] ' if dry_run else ''}Files to remove:[/bold]")
+        for path, desc in targets:
+            console.print(f"  {desc}: {path}")
 
-    # Preview
-    console.print(f"[bold]{'[DRY RUN] ' if dry_run else ''}Files to remove:[/bold]")
-    for path, desc in targets:
-        console.print(f"  {desc}: {path}")
+    if targets and not dry_run:
+        # Backup before destructive operations
+        backup_dir = Path("backups")
+        backup_dir.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = backup_dir / f"pre-clean-{stamp}.tar.gz"
 
-    if dry_run:
+        existing_targets = [p for p, _ in targets if p.exists() and not str(p).endswith("__pycache__")]
+        if existing_targets:
+            console.print(f"\n[dim]Backing up to {backup_path}...[/dim]")
+            with tarfile.open(backup_path, "w:gz") as tar:
+                for path in existing_targets:
+                    try:
+                        tar.add(path)
+                    except Exception:
+                        pass
+            console.print(f"  [green]Backup saved ({backup_path})[/green]")
+
+        # Delete
+        removed = 0
+        for path, desc in targets:
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                elif path.exists():
+                    path.unlink()
+                removed += 1
+            except Exception as e:
+                console.print(f"  [red]Failed to remove {path}: {e}[/red]")
+
+        console.print(f"\n[bold green]Cleaned {removed} item(s).[/bold green]")
+    elif targets and dry_run:
         console.print(f"\n[dim]{len(targets)} item(s) would be removed.[/dim]")
-        return
 
-    # Backup before destructive operations
-    backup_dir = Path("backups")
-    backup_dir.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = backup_dir / f"pre-clean-{stamp}.tar.gz"
-
-    existing_targets = [p for p, _ in targets if p.exists() and not str(p).endswith("__pycache__")]
-    if existing_targets:
-        console.print(f"\n[dim]Backing up to {backup_path}...[/dim]")
-        with tarfile.open(backup_path, "w:gz") as tar:
-            for path in existing_targets:
+    # Chat reset (for --full or --chats)
+    if full or reset_chats:
+        chats_dir = memory_path / "chats"
+        reset_count = 0
+        if chats_dir.exists():
+            for chat_file in sorted(chats_dir.glob("*.md")):
                 try:
-                    tar.add(path)
+                    text = chat_file.read_text(encoding="utf-8")
+                    if "processed: true" in text or "processed: True" in text:
+                        if dry_run:
+                            console.print(f"  Would reset: {chat_file.name}")
+                        else:
+                            # Re-parse and rewrite with processed: false
+                            from src.core.utils import parse_frontmatter
+                            fm_data, body = parse_frontmatter(text)
+                            fm_data["processed"] = False
+                            # Remove processing metadata
+                            for key in ["processed_at", "entities_updated", "entities_created", "fallback", "fallback_reason"]:
+                                fm_data.pop(key, None)
+                            fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
+                            chat_file.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
+                        reset_count += 1
                 except Exception:
-                    pass
-        console.print(f"  [green]Backup saved ({backup_path})[/green]")
+                    continue
 
-    # Delete
-    removed = 0
-    for path, desc in targets:
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-            removed += 1
-        except Exception as e:
-            console.print(f"  [red]Failed to remove {path}: {e}[/red]")
+        # Move _processed back to _inbox
+        processed_dir = memory_path / "_inbox" / "_processed"
+        inbox_moved = 0
+        if processed_dir.exists():
+            for f in processed_dir.iterdir():
+                if dry_run:
+                    console.print(f"  Would move back to inbox: {f.name}")
+                else:
+                    shutil.move(str(f), str(memory_path / "_inbox" / f.name))
+                inbox_moved += 1
+            if not dry_run and not any(processed_dir.iterdir()):
+                processed_dir.rmdir()
 
-    console.print(f"\n[bold green]Cleaned {removed} item(s).[/bold green]")
+        # Remove dream checkpoint and event log
+        extra_files = ["_dream_checkpoint.json", "_event_log.jsonl"]
+        for fname in extra_files:
+            p = memory_path / fname
+            if p.exists():
+                if dry_run:
+                    console.print(f"  Would remove: {fname}")
+                else:
+                    p.unlink()
+
+        if reset_count or inbox_moved:
+            action = "Would reset" if dry_run else "Reset"
+            console.print(f"  [green]{action} {reset_count} chat(s), moved {inbox_moved} inbox file(s)[/green]")
+
+    if not targets and not (full or reset_chats):
+        console.print("[green]Nothing to clean.[/green]")
 
 
 @cli.command()
@@ -499,6 +558,30 @@ def context(ctx):
         write_context(config.memory_path, context_text)
     write_index(config.memory_path, graph)
     console.print("[green]✓ _context.md and _index.md updated[/green]")
+
+
+@cli.command()
+@click.option("--entity", default=None, help="Discover relations for a single entity")
+@click.option("--dry-run", is_flag=True, help="Preview without writing")
+@click.pass_context
+def relations(ctx, entity, dry_run):
+    """Discover new relations using FAISS similarity + tag overlap + co-occurrence (zero LLM)."""
+    from src.pipeline.orchestrator import discover_relations_deterministic
+    from src.core.utils import slugify
+
+    config = ctx.obj["config"]
+    entity_filter = slugify(entity) if entity else None
+
+    mode = "[DRY RUN] " if dry_run else ""
+    scope = f"for {entity}" if entity else "full scan"
+    console.print(f"\n[bold]{mode}Relation discovery ({scope})...[/bold]")
+
+    n = discover_relations_deterministic(config, config.memory_path, console, entity_filter=entity_filter, dry_run=dry_run)
+
+    if dry_run:
+        console.print(f"\n[dim]{n} relation(s) would be created[/dim]")
+    else:
+        console.print(f"\n[bold green]✓ {n} new relation(s) discovered[/bold green]")
 
 
 @cli.command()
