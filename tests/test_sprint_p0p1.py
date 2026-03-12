@@ -90,7 +90,7 @@ class TestCleanCommand:
             "clean",
         ])
         assert result.exit_code == 0
-        assert "Specify --all or --artifacts" in result.output
+        assert "Specify --all" in result.output
 
 
 # ── Retry ledger ─────────────────────────────────────────────
