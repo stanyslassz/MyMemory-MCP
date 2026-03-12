@@ -161,6 +161,15 @@ def create_entity(
     return filepath
 
 
+def _stub_retention(entity_type: str) -> str:
+    """Determine initial retention for stub entities."""
+    if entity_type == "ai_self":
+        return "permanent"
+    if entity_type in ("person", "animal", "health"):
+        return "long_term"
+    return "short_term"
+
+
 def create_stub_entity(
     memory_path: Path,
     folder: str,
@@ -173,7 +182,7 @@ def create_stub_entity(
     fm = EntityFrontmatter(
         title=title,
         type=entity_type,
-        retention="short_term",
+        retention=_stub_retention(entity_type),
         score=0.0,
         importance=0.3,
         frequency=1,

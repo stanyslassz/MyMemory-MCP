@@ -128,6 +128,26 @@ class FactTTLConfig:
 
 
 @dataclass
+class ContextConfig:
+    """Parameters for context generation (builder + formatter)."""
+    reserved_tokens_natural: int = 500
+    reserved_tokens_structured: int = 500
+    min_budget_tokens: int = 500
+    top_entities_count: int = 50
+    available_entities_limit: int = 30
+    default_budget_pct: int = 20
+    top_of_mind_limit: int = 15
+    rag_chunk_preview_len: int = 200
+    max_rag_results: int = 15
+    max_vigilance_items: int = 15
+    max_facts_per_category: int = 5
+    max_facts_per_category_ai_self: int = 3
+    fact_dedup_threshold: float = 0.35
+    min_rel_strength: float = 0.3
+    max_rel_age_days: int = 365
+
+
+@dataclass
 class Config:
     user_language: str = "fr"
     llm_extraction: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
@@ -155,6 +175,7 @@ class Config:
     nlp: NLPConfig = field(default_factory=NLPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
+    ctx: ContextConfig = field(default_factory=ContextConfig)
     context_narrative: bool = False
     context_llm_sections: bool = False
     context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
@@ -229,6 +250,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     nlp_cfg = raw.get("nlp", {})
     search_cfg = raw.get("search", {})
     ttl_cfg = raw.get("fact_ttl", {})
+    ctx_cfg = raw.get("context", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -316,4 +338,5 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             fts_db_path=search_cfg.get("fts_db_path", "_memory_fts.db"),
         ),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
+        ctx=ContextConfig(**{k: v for k, v in ctx_cfg.items() if hasattr(ContextConfig, k)}),
     )

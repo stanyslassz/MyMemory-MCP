@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from src.core.config import Config, ScoringConfig
+from src.core.config import Config, ContextConfig, FactTTLConfig, ScoringConfig
 from src.core.models import EntityFrontmatter, GraphData, GraphEntity, GraphRelation
 from src.memory.context import build_context, generate_index, write_index
 from src.memory.store import write_entity
@@ -18,6 +18,8 @@ def _make_config(tmp_path):
     config.user_language = "fr"
     config.prompts_path = tmp_path / "prompts"
     config.context_narrative = False
+    config.ctx = ContextConfig()
+    config.fact_ttl = FactTTLConfig()
     return config
 
 

@@ -6,7 +6,7 @@ from src.core.config import ScoringConfig, Config
 from src.core.models import GraphData, GraphEntity, GraphRelation
 from src.memory.scoring import (
     calculate_score, calculate_actr_base, recalculate_all_scores,
-    get_top_entities, spreading_activation, _apply_ltd,
+    get_top_entities, spreading_activation, _apply_ltd, _upgrade_retention,
 )
 
 
@@ -512,3 +512,72 @@ def test_emotional_boost_zero_when_no_negative():
     # Score should be the same as without the feature
     config_no_emotion = _make_config(emotional_boost_weight=0.0)
     assert calculate_score(entity, config, today) == calculate_score(entity, config_no_emotion, today)
+
+
+# ── GAP 5: Retention auto-upgrade ─────────────────────────────
+
+
+def test_upgrade_retention_person():
+    """Person with freq>=3 should be upgraded from short_term to long_term."""
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["alice"] = GraphEntity(
+        file="close_ones/alice.md", type="person", title="Alice",
+        importance=0.5, frequency=5, retention="short_term",
+        mention_dates=["2026-03-05"],
+    )
+    _upgrade_retention(graph, today)
+    assert graph.entities["alice"].retention == "long_term"
+
+
+def test_upgrade_retention_ai_self():
+    """ai_self should always be upgraded to permanent."""
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["claude"] = GraphEntity(
+        file="self/claude.md", type="ai_self", title="Claude",
+        importance=0.5, frequency=1, retention="short_term",
+        mention_dates=["2026-03-05"],
+    )
+    _upgrade_retention(graph, today)
+    assert graph.entities["claude"].retention == "permanent"
+
+
+def test_upgrade_retention_no_downgrade():
+    """Permanent entities should never be downgraded."""
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["perm"] = GraphEntity(
+        file="self/perm.md", type="interest", title="Perm",
+        importance=0.5, frequency=1, retention="permanent",
+        mention_dates=["2026-03-05"],
+    )
+    _upgrade_retention(graph, today)
+    assert graph.entities["perm"].retention == "permanent"
+
+
+def test_upgrade_retention_health():
+    """Health with freq>=2 should be upgraded to long_term."""
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["sciatique"] = GraphEntity(
+        file="self/sciatique.md", type="health", title="Sciatique",
+        importance=0.7, frequency=3, retention="short_term",
+        mention_dates=["2026-03-05"],
+    )
+    _upgrade_retention(graph, today)
+    assert graph.entities["sciatique"].retention == "long_term"
+
+
+def test_upgrade_retention_frequent_old_entity():
+    """Entity with freq>=10 and age>30 days should be upgraded to long_term."""
+    today = date(2026, 3, 5)
+    graph = GraphData()
+    graph.entities["project"] = GraphEntity(
+        file="projects/myproject.md", type="project", title="MyProject",
+        importance=0.5, frequency=12, retention="short_term",
+        created="2026-01-01",
+        mention_dates=["2026-03-05"],
+    )
+    _upgrade_retention(graph, today)
+    assert graph.entities["project"].retention == "long_term"

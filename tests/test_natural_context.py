@@ -100,10 +100,10 @@ def test_select_entities_filters_transient():
 # --- Test 2: Temporal classification (stable person) ---
 
 def test_classify_temporal_stable_person():
-    """Stable person (long_term, freq>=5) stays long_term even if mentioned yesterday."""
+    """Person with freq>=5 classified long_term even with retention=short_term."""
     entity = _make_entity(
         type="person",
-        retention="long_term",
+        retention="short_term",  # retention not yet upgraded
         frequency=10,
         last_mentioned=(_today() - timedelta(days=1)).isoformat(),
     )
@@ -118,9 +118,38 @@ def test_classify_temporal_recent_project():
         type="project",
         retention="short_term",
         frequency=2,
+        file="projects/test.md",
+        created=(_today() - timedelta(days=10)).isoformat(),
         last_mentioned=(_today() - timedelta(days=3)).isoformat(),
     )
     assert _classify_temporal(entity, _today()) == "short_term"
+
+
+# --- Test 3b: Health always long_term ---
+
+def test_classify_temporal_health_always_longterm():
+    """Health entity with retention=short_term → long_term via heuristic."""
+    entity = _make_entity(
+        type="health",
+        retention="short_term",
+        frequency=1,
+        last_mentioned=(_today() - timedelta(days=1)).isoformat(),
+    )
+    assert _classify_temporal(entity, _today()) == "long_term"
+
+
+# --- Test 3c: Old frequent entity → long_term ---
+
+def test_classify_temporal_old_frequent_entity():
+    """Entity created 60 days ago with freq=5, retention=short_term → long_term."""
+    entity = _make_entity(
+        type="project",
+        retention="short_term",
+        frequency=5,
+        created=(_today() - timedelta(days=60)).isoformat(),
+        last_mentioned=(_today() - timedelta(days=2)).isoformat(),
+    )
+    assert _classify_temporal(entity, _today()) == "long_term"
 
 
 # --- Test 4: Bullet with summary ---

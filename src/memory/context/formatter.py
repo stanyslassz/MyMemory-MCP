@@ -114,15 +114,28 @@ def _classify_temporal(entity: GraphEntity, today: date) -> str:
         return "long_term"
     days_since = (today - last).days
 
-    # Stable entities (people, animals with long history) -> always long term
-    is_stable = (
-        entity.type in ("person", "animal")
-        and entity.retention in ("long_term", "permanent")
-        and entity.frequency >= 5
-    )
-    if is_stable:
+    # Heuristic: identity entity types are always long_term
+    if entity.type in ("person", "animal") and entity.frequency >= 5:
+        return "long_term"
+    if entity.type in ("health", "ai_self"):
+        return "long_term"
+    if entity.file.startswith("self/"):
         return "long_term"
 
+    # Heuristic: old + frequently mentioned entity
+    if entity.created:
+        try:
+            created = date.fromisoformat(entity.created)
+            if (today - created).days > 30 and entity.frequency >= 3:
+                return "long_term"
+        except (ValueError, TypeError):
+            pass
+
+    # Override by retention (works once retention is upgraded)
+    if entity.retention in ("long_term", "permanent"):
+        return "long_term"
+
+    # Fallback by recency
     if days_since <= 7:
         return "short_term"
     elif days_since <= 30:

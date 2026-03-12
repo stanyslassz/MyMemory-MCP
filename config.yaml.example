@@ -148,6 +148,17 @@ fact_ttl:
   interaction_rule: 0
   interpersonal: 0
 
+# ── Context generation ────────────────────────────────────────
+# Parameters for builder + formatter (sensible defaults, rarely need tuning).
+context:
+  top_entities_count: 50
+  top_of_mind_limit: 15
+  available_entities_limit: 30
+  max_facts_per_category: 5
+  max_facts_per_category_ai_self: 3
+  min_rel_strength: 0.3
+  max_rel_age_days: 365
+
 # ── Categories ─────────────────────────────────────────────────
 categories:
   observations:

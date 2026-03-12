@@ -29,6 +29,15 @@ EXCLUSIVE_RELATIONS: list[set[str]] = [
 ]
 
 
+def _initial_retention(entity_type: str) -> str:
+    """Determine initial retention based on entity type."""
+    if entity_type == "ai_self":
+        return "permanent"
+    if entity_type in ("person", "animal", "health"):
+        return "long_term"
+    return "short_term"
+
+
 def _check_relation_conflicts(
     graph, from_entity: str, to_entity: str, new_type: str, memory_path: Path,
 ) -> None:
@@ -113,7 +122,7 @@ def enrich_memory(
                         importance=0.3,
                         frequency=1,
                         last_mentioned=today,
-                        retention="short_term",
+                        retention=_initial_retention("interest"),
                     ))
 
             if from_slug and to_slug:
@@ -146,8 +155,20 @@ def enrich_memory(
         except Exception as e:
             report.errors.append(f"Error processing relation {rel.from_name} → {rel.to_name}: {e}")
 
-    # Recalculate scores
+    # Recalculate scores (also upgrades retention)
     graph = recalculate_all_scores(graph, config, date.fromisoformat(today))
+
+    # Persist retention upgrades to MD files
+    for eid, entity in graph.entities.items():
+        entity_path = memory_path / entity.file
+        if entity_path.exists():
+            try:
+                fm, sections = read_entity(entity_path)
+                if fm.retention != entity.retention:
+                    fm.retention = entity.retention
+                    write_entity(entity_path, fm, sections)
+            except Exception:
+                pass
 
     # Save graph and regenerate index
     save_graph(memory_path, graph)
@@ -262,10 +283,12 @@ def _create_new_entity(
         if raw_entity.observations else 0.3
     )
 
+    retention = _initial_retention(raw_entity.type)
+
     fm = EntityFrontmatter(
         title=raw_entity.name,
         type=raw_entity.type,
-        retention="short_term",
+        retention=retention,
         score=0.0,
         importance=avg_importance,
         frequency=1,
@@ -295,7 +318,7 @@ def _create_new_entity(
         last_mentioned=today,
         created=today,
         mention_dates=[today],
-        retention="short_term",
+        retention=retention,
         aliases=[],
         tags=fm.tags,
     )

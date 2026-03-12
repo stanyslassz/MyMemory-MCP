@@ -207,6 +207,27 @@ def _apply_ltd(graph: GraphData, config: Config, today: date) -> None:
             rel.strength = round(max(0.1, rel.strength * decay), 4)
 
 
+def _upgrade_retention(graph: GraphData, today: date) -> None:
+    """Promote retention based on entity type + frequency + age. Never downgrades."""
+    for eid, entity in graph.entities.items():
+        if entity.retention == "permanent":
+            continue
+        if entity.type == "ai_self":
+            entity.retention = "permanent"
+        elif entity.retention == "long_term":
+            continue
+        elif entity.type in ("person", "animal") and entity.frequency >= 3:
+            entity.retention = "long_term"
+        elif entity.type == "health" and entity.frequency >= 2:
+            entity.retention = "long_term"
+        elif entity.frequency >= 10 and entity.created:
+            try:
+                if (today - date.fromisoformat(entity.created)).days > 30:
+                    entity.retention = "long_term"
+            except (ValueError, TypeError):
+                pass
+
+
 def recalculate_all_scores(
     graph: GraphData,
     config: Config,
@@ -214,10 +235,13 @@ def recalculate_all_scores(
 ) -> GraphData:
     """Recalculate scores for all entities using ACT-R + spreading activation.
 
-    Also applies LTD (Long-Term Depression) to relation stored strengths.
+    Also upgrades retention and applies LTD (Long-Term Depression).
     """
     if today is None:
         today = date.today()
+
+    # Upgrade retention before scoring (affects decay_factor choice)
+    _upgrade_retention(graph, today)
 
     # LTD: decay stored strength for non-reinforced relations
     _apply_ltd(graph, config, today)
