@@ -83,6 +83,8 @@ def update_entity(
     frequency_increment: int = 1,
     last_mentioned: str | None = None,
     max_facts: int | None = None,
+    mention_dates: list[str] | None = None,
+    monthly_buckets: dict[str, int] | None = None,
 ) -> EntityFrontmatter:
     """Update an existing entity: add observations, relations, bump frequency."""
     import logging
@@ -122,6 +124,10 @@ def update_entity(
     frontmatter.frequency += frequency_increment
     if last_mentioned:
         frontmatter.last_mentioned = last_mentioned
+    if mention_dates is not None:
+        frontmatter.mention_dates = mention_dates
+    if monthly_buckets is not None:
+        frontmatter.monthly_buckets = monthly_buckets
 
     write_entity(filepath, frontmatter, sections)
     return frontmatter

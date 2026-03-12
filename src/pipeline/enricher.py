@@ -214,19 +214,24 @@ def _update_existing_entity(
         for obs in raw_entity.observations
     ]
 
-    # Update MD file
-    updated_fm = update_entity(filepath, new_observations=new_obs, last_mentioned=today, max_facts=max_facts)
-
-    # Update graph metadata
-    entity_meta.frequency = updated_fm.frequency
-    entity_meta.last_mentioned = today
-
-    # Update mention_dates (windowed)
+    # Compute temporal fields FIRST (before writing to MD)
     from src.memory.mentions import add_mention
     entity_meta.mention_dates, entity_meta.monthly_buckets = add_mention(
         today, entity_meta.mention_dates, entity_meta.monthly_buckets,
         window_size=50,
     )
+
+    # Update MD file with temporal fields persisted to frontmatter
+    updated_fm = update_entity(
+        filepath, new_observations=new_obs, last_mentioned=today,
+        max_facts=max_facts,
+        mention_dates=entity_meta.mention_dates,
+        monthly_buckets=entity_meta.monthly_buckets,
+    )
+
+    # Update graph metadata
+    entity_meta.frequency = updated_fm.frequency
+    entity_meta.last_mentioned = today
 
     # Update importance (running average)
     if raw_entity.observations:
