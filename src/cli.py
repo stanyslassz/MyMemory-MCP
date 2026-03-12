@@ -441,8 +441,10 @@ def consolidate(ctx, dry_run, facts, min_facts):
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Show what would change without modifying")
 @click.option("--step", type=int, default=None, help="Run only step N (1-10)")
+@click.option("--resume", is_flag=True, help="Resume from last checkpoint")
+@click.option("--reset", is_flag=True, help="Clear checkpoint and restart")
 @click.pass_context
-def dream(ctx, dry_run, step):
+def dream(ctx, dry_run, step, resume, reset):
     """Brain-like memory reorganization: consolidate, prune, discover, rebuild.
 
     10 steps: load → extract docs → consolidate facts → merge entities
@@ -456,7 +458,7 @@ def dream(ctx, dry_run, step):
     step_info = f" (step {step} only)" if step else ""
     console.print(f"\n[bold]{mode}Dream mode{step_info}[/bold]")
 
-    report = run_dream(config, console, dry_run=dry_run, step=step)
+    report = run_dream(config, console, dry_run=dry_run, step=step, resume=resume, reset=reset)
 
     # Summary
     console.print("\n[bold]Dream report:[/bold]")

@@ -10,10 +10,11 @@ LLM coordinator plans which steps to run and validates critical results.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import get_args
 
@@ -25,6 +26,34 @@ from src.core.models import GraphData, GraphRelation, RelationType
 logger = logging.getLogger(__name__)
 
 _VALID_RELATION_TYPES: set[str] = set(get_args(RelationType))
+
+
+def _save_checkpoint(memory_path: Path, dream_id: str, step: int, steps_planned: list[int]) -> None:
+    """Write checkpoint after each successful dream step."""
+    checkpoint = {
+        "dream_id": dream_id,
+        "last_completed_step": step,
+        "steps_planned": steps_planned,
+        "started_at": dream_id,
+    }
+    (memory_path / "_dream_checkpoint.json").write_text(
+        json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _load_checkpoint(memory_path: Path) -> dict | None:
+    """Load existing checkpoint if any."""
+    path = memory_path / "_dream_checkpoint.json"
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return None
+
+
+def _clear_checkpoint(memory_path: Path) -> None:
+    """Remove checkpoint file after successful completion."""
+    path = memory_path / "_dream_checkpoint.json"
+    if path.exists():
+        path.unlink()
 
 
 def decide_dream_steps(stats: dict) -> list[int]:
@@ -69,6 +98,8 @@ def run_dream(
     *,
     dry_run: bool = False,
     step: int | None = None,
+    resume: bool = False,
+    reset: bool = False,
 ) -> DreamReport:
     """Run the full dream pipeline (or a single step).
 
@@ -79,12 +110,23 @@ def run_dream(
 
     report = DreamReport()
     memory_path = config.memory_path
+    dream_id = datetime.now().isoformat()
+
+    # Handle checkpoint resume/reset
+    if reset:
+        _clear_checkpoint(memory_path)
+
+    checkpoint = _load_checkpoint(memory_path) if not reset else None
 
     # Always load graph first
     graph, entity_paths = _step_load(memory_path)
 
     # Determine which steps to run
-    if step is not None:
+    if resume and checkpoint:
+        steps_to_run = [s for s in checkpoint["steps_planned"] if s > checkpoint["last_completed_step"]]
+        dream_id = checkpoint["dream_id"]
+        console.print(f"[dim]Resuming dream from step {checkpoint['last_completed_step'] + 1} (started {dream_id})[/dim]")
+    elif step is not None:
         steps_to_run = [step]
     else:
         # Deterministic step selection based on stats
@@ -154,7 +196,9 @@ def run_dream(
                 elif s == 9:
                     if not dry_run:
                         from src.memory.scoring import recalculate_all_scores
+                        from src.memory.graph import save_graph
                         graph = recalculate_all_scores(graph, config)
+                        save_graph(memory_path, graph)
                     dashboard.complete_step(s, "scores updated")
 
                 elif s == 10:
@@ -162,9 +206,15 @@ def run_dream(
                         _step_rebuild(graph, memory_path, config, console)
                     dashboard.complete_step(s, "context + FAISS rebuilt")
 
+                if not dry_run:
+                    _save_checkpoint(memory_path, dream_id, s, steps_to_run)
+
             except Exception as e:
                 dashboard.fail_step(s, str(e)[:50])
                 report.errors.append(f"Step {s} failed: {e}")
+
+    if not dry_run:
+        _clear_checkpoint(memory_path)
 
     return report
 
