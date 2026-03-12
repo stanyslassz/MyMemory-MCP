@@ -163,6 +163,10 @@ def build_index(memory_path: Path, config: Config) -> dict:
 
     for md_file in files:
         text = md_file.read_text(encoding="utf-8")
+        # Strip YAML frontmatter to avoid indexing metadata
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            text = parts[2] if len(parts) >= 3 else text
         file_hash = _file_hash(md_file)
         rel_path = str(md_file.relative_to(memory_path))
         entity_id = md_file.stem
@@ -176,6 +180,7 @@ def build_index(memory_path: Path, config: Config) -> dict:
                 "file": rel_path,
                 "entity_id": entity_id,
                 "chunk_idx": i,
+                "chunk_text": chunk,
             })
 
         manifest["indexed_files"][rel_path] = {
@@ -293,11 +298,16 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
         results.append(SearchResult(
             entity_id=mapping["entity_id"],
             file=mapping["file"],
-            chunk=f"[chunk {mapping['chunk_idx']}]",
+            chunk=mapping.get("chunk_text", f"[chunk {mapping['chunk_idx']}]"),
             score=float(score),
         ))
 
-    return results
+    # Deduplicate by entity: keep best-scoring chunk per entity
+    seen: dict[str, SearchResult] = {}
+    for result in results:
+        if result.entity_id not in seen or result.score > seen[result.entity_id].score:
+            seen[result.entity_id] = result
+    return sorted(seen.values(), key=lambda r: r.score, reverse=True)[:top_k]
 
 
 def list_unextracted_docs(manifest_path: str) -> list[dict]:
