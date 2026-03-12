@@ -44,9 +44,21 @@ def _get_config():
 
 @mcp.tool()
 def get_context() -> str:
-    """Returns the pre-compiled memory context.
+    """Retrieve the user's complete memory context — their identity, preferences, relationships, and recent history.
 
-    Reads _context.md. Falls back to _index.md if absent.
+    USE THIS WHEN:
+    - Starting a new conversation — call this first to understand who the user is
+    - You need background on the user's life, work, health, or relationships
+    - You want to personalize your response based on what you know about them
+
+    DO NOT USE WHEN:
+    - Looking for a specific fact or detail — use search_rag instead
+    - The context was already loaded earlier in this conversation
+
+    Returns:
+        Pre-compiled markdown context organized into sections: AI personality,
+        identity, work, personal life, top-of-mind topics, vigilances, and history.
+        Falls back to a simpler entity index if context hasn't been generated yet.
     """
     config = _get_config()
     memory_path = config.memory_path
@@ -64,13 +76,26 @@ def get_context() -> str:
 
 @mcp.tool()
 def save_chat(messages: list[dict]) -> dict:
-    """Saves a conversation for later processing.
+    """Save this conversation to the user's memory for later processing and knowledge extraction.
+
+    USE THIS WHEN:
+    - The conversation contains new information worth remembering (personal updates,
+      decisions, preferences, health changes, project progress)
+    - The user explicitly asks to save or remember something
+    - At the end of a meaningful conversation
+
+    DO NOT USE WHEN:
+    - The conversation is purely technical/coding with no personal information
+    - The conversation only contains small talk with no new facts
+    - The chat has already been saved
 
     Args:
-        messages: List of message dicts with 'role' and 'content' keys.
+        messages: List of message dicts, each with 'role' (str: 'user' or 'assistant')
+                  and 'content' (str). Example: [{"role": "user", "content": "I started a new job at Acme"}]
 
     Returns:
-        Status dict with 'status' and 'file' keys, or error dict.
+        Dict with 'status' ('saved' or 'error') and 'file' (relative path to saved chat).
+        The chat is saved with processed=false and will be extracted on next 'memory run'.
     """
     # Validate messages
     if not isinstance(messages, list) or len(messages) == 0:
@@ -133,13 +158,30 @@ def _rrf_fusion(
 
 @mcp.tool()
 def search_rag(query: str) -> dict:
-    """Semantic search across memory.
+    """Search the user's memory for specific information using semantic + keyword search.
+
+    USE THIS WHEN:
+    - Looking for a specific fact not in the current context (e.g., "what medication does the user take?")
+    - The user asks about something from a past conversation
+    - You need details about a specific entity, event, or relationship
+    - Context from get_context() doesn't contain what you need
+
+    DO NOT USE WHEN:
+    - You need general background — use get_context() first
+    - The information is already available in the current context
+
+    Good queries: "back pain treatment", "project deadline", "wife's birthday"
+    Bad queries: "tell me everything", "what do you know" (too vague — use get_context instead)
 
     Args:
-        query: The search query string.
+        query: Natural language search query. Be specific for best results.
+               Shorter, focused queries work better than long sentences.
 
     Returns:
-        Dict with search results enriched with entity relations.
+        Dict with 'query', 'total' result count, and 'results' list. Each result has:
+        entity_id, file, score, title, type, and related entities (relations list).
+        Results are ranked by hybrid score (semantic similarity + keyword match + memory strength).
+        Also promotes retrieved entities in memory (L2→L1 re-emergence).
     """
     config = _get_config()
     memory_path = config.memory_path
@@ -511,11 +553,24 @@ def _correct_entity_impl(entity_name: str, field: str, new_value: str, config: C
 
 @mcp.tool()
 def delete_fact(entity_name: str, fact_content: str) -> str:
-    """Delete a specific fact from an entity's memory.
+    """Permanently delete a specific fact from an entity's memory.
+
+    USE THIS WHEN:
+    - The user says a stored fact is wrong and wants it removed entirely
+    - A fact is outdated and should be deleted (not just updated)
+    - Removing sensitive or incorrect information
+
+    DO NOT USE WHEN:
+    - The fact needs correction — use modify_fact to update it instead
+    - You want to update the entity itself — use correct_entity
 
     Args:
-        entity_name: Name of the entity (title, slug, or alias)
-        fact_content: Content of the fact to delete (partial match supported)
+        entity_name: Name of the entity (exact title, slug like 'back-pain', or known alias).
+        fact_content: Partial content match — e.g., "started physiotherapy" will match
+                      a fact containing that phrase. Case-insensitive.
+
+    Returns:
+        JSON string with 'status' ('deleted' or 'error'), entity name, and the deleted fact line.
     """
     config = _get_config()
     return _delete_fact_impl(entity_name, fact_content, config)
@@ -523,12 +578,25 @@ def delete_fact(entity_name: str, fact_content: str) -> str:
 
 @mcp.tool()
 def delete_relation(from_entity: str, to_entity: str, relation_type: str) -> str:
-    """Delete a relation between two entities.
+    """Remove a relationship between two entities.
+
+    USE THIS WHEN:
+    - A relationship no longer exists (e.g., user no longer works_at a company)
+    - A relationship was incorrectly created
+    - The user explicitly asks to remove a connection between two things
+
+    DO NOT USE WHEN:
+    - You want to change the relationship type — delete the old one, then the pipeline
+      will create the new one from future conversations
 
     Args:
-        from_entity: Source entity name
-        to_entity: Target entity name
-        relation_type: Type of relation (affects, parent_of, friend_of, etc.)
+        from_entity: Source entity name (title, slug, or alias).
+        to_entity: Target entity name (title, slug, or alias).
+        relation_type: One of: affects, improves, worsens, requires, linked_to, lives_with,
+                       works_at, parent_of, friend_of, uses, part_of, contrasts_with, precedes.
+
+    Returns:
+        JSON string with 'status' ('deleted' or 'error') and the removed relation details.
     """
     config = _get_config()
     return _delete_relation_impl(from_entity, to_entity, relation_type, config)
@@ -536,12 +604,25 @@ def delete_relation(from_entity: str, to_entity: str, relation_type: str) -> str
 
 @mcp.tool()
 def modify_fact(entity_name: str, old_content: str, new_content: str) -> str:
-    """Modify a fact's content while preserving its metadata (category, date, valence).
+    """Update a fact's content while keeping its metadata (category, date, valence, tags).
+
+    USE THIS WHEN:
+    - A fact needs correction (e.g., wrong date, misspelling, outdated detail)
+    - The user provides updated information about an existing fact
+    - Partial information needs to be completed or refined
+
+    DO NOT USE WHEN:
+    - The fact should be removed entirely — use delete_fact
+    - You want to add a new fact — save a chat with the new information instead
+    - You want to change the entity's metadata — use correct_entity
 
     Args:
-        entity_name: Name of the entity
-        old_content: Content to find (partial match)
-        new_content: New content to replace with
+        entity_name: Name of the entity (title, slug, or alias).
+        old_content: Partial content to find the fact (case-insensitive substring match).
+        new_content: Replacement content. Category, date, valence, and tags are preserved.
+
+    Returns:
+        JSON string with 'status' ('modified' or 'error'), old and new fact lines.
     """
     config = _get_config()
     return _modify_fact_impl(entity_name, old_content, new_content, config)
@@ -549,12 +630,28 @@ def modify_fact(entity_name: str, old_content: str, new_content: str) -> str:
 
 @mcp.tool()
 def correct_entity(entity_name: str, field: str, new_value: str) -> str:
-    """Correct an entity's metadata (title, type, aliases, retention).
+    """Correct an entity's metadata — title, type, aliases, or retention level.
+
+    USE THIS WHEN:
+    - An entity has the wrong name or type (e.g., 'interest' should be 'health')
+    - Adding or updating aliases for better future matching
+    - Changing retention (short_term, long_term, permanent) to control how long it's remembered
+    - The user says "that's not a person, it's an organization"
+
+    DO NOT USE WHEN:
+    - You want to change a fact about the entity — use modify_fact or delete_fact
+    - You want to remove a relationship — use delete_relation
 
     Args:
-        entity_name: Name of the entity
-        field: Field to correct (title, type, aliases, retention)
-        new_value: New value (for aliases, comma-separated list)
+        entity_name: Current name of the entity (title, slug, or alias).
+        field: One of 'title', 'type', 'aliases', 'retention'.
+        new_value: New value. For aliases, provide comma-separated list (e.g., "back pain, sciatica, lumbar").
+                   For type, use: person, health, work, project, interest, place, animal, organization, ai_self.
+                   For retention: short_term, long_term, permanent.
+
+    Returns:
+        JSON string with 'status' ('updated' or 'error') and change details.
+        If type changes, the entity file is automatically moved to the correct folder.
     """
     config = _get_config()
     return _correct_entity_impl(entity_name, field, new_value, config)
