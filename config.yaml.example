@@ -75,6 +75,7 @@ scoring:
   emotional_boost_weight: 0.15   # Amygdala modulation: negative/vigilance facts boost consolidation
   window_size: 50                # Recent mention dates to keep precisely
   min_score_for_context: 0.3     # Minimum score to appear in context
+  max_spreading_neighbors: 10   # Cap neighbors in spreading activation (prevents hub dilution)
 
 # ── Background job ─────────────────────────────────────────────
 job:
