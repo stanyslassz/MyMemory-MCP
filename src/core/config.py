@@ -105,6 +105,28 @@ class SearchConfig:
 
 
 @dataclass
+class FactTTLConfig:
+    """TTL (time-to-live) in days per observation category. 0 = never expires."""
+    context: int = 60
+    project: int = 90
+    emotion: int = 30
+    progression: int = 60
+    fact: int = 0          # permanent
+    preference: int = 0
+    diagnosis: int = 0
+    vigilance: int = 0
+    treatment: int = 0
+    technique: int = 0
+    decision: int = 90
+    skill: int = 0
+    rule: int = 0
+    ai_style: int = 0
+    user_reaction: int = 60
+    interaction_rule: int = 0
+    interpersonal: int = 0
+
+
+@dataclass
 class Config:
     user_language: str = "fr"
     llm_extraction: LLMStepConfig = field(default_factory=lambda: LLMStepConfig(model="ollama/llama3.1:8b"))
@@ -131,6 +153,7 @@ class Config:
     ingest: IngestConfig = field(default_factory=IngestConfig)
     nlp: NLPConfig = field(default_factory=NLPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
     context_narrative: bool = False
     context_llm_sections: bool = False
     context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
@@ -154,6 +177,10 @@ class Config:
     def get_max_facts(self, entity_type: str) -> int:
         """Return the max facts limit for an entity type."""
         return self.max_facts.get(entity_type, self.max_facts.get("default", 50))
+
+    def get_fact_ttl(self, category: str) -> int:
+        """Return TTL in days for a fact category. 0 = never expires."""
+        return getattr(self.fact_ttl, category, 0)
 
 
 def _build_llm_step(data: dict[str, Any]) -> LLMStepConfig:
@@ -200,6 +227,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     ingest_cfg = raw.get("ingest", {})
     nlp_cfg = raw.get("nlp", {})
     search_cfg = raw.get("search", {})
+    ttl_cfg = raw.get("fact_ttl", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -285,4 +313,5 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             weight_actr=search_cfg.get("weight_actr", 0.2),
             fts_db_path=search_cfg.get("fts_db_path", "_memory_fts.db"),
         ),
+        fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
     )

@@ -125,6 +125,28 @@ max_facts:
   default: 50
   ai_self: 20
 
+# ── Fact TTL (time-to-live) per category ─────────────────────
+# Days before a fact is excluded from L1 context (0 = never expires).
+# Facts remain in MD files and RAG — TTL only affects _context.md.
+fact_ttl:
+  context: 60
+  project: 90
+  emotion: 30
+  progression: 60
+  fact: 0
+  preference: 0
+  diagnosis: 0
+  vigilance: 0
+  treatment: 0
+  technique: 0
+  decision: 90
+  skill: 0
+  rule: 0
+  ai_style: 0
+  user_reaction: 60
+  interaction_rule: 0
+  interpersonal: 0
+
 # ── Categories ─────────────────────────────────────────────────
 categories:
   observations:

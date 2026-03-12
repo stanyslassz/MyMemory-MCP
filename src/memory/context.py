@@ -324,8 +324,38 @@ def _estimate_tokens(text: str) -> int:
     return _estimate_tokens_util(text)
 
 
+def _is_fact_expired(obs_dict: dict, config: Config, today: date) -> bool:
+    """Check if a fact has exceeded its TTL for context display."""
+    category = obs_dict.get("category", "")
+    ttl_days = config.get_fact_ttl(category)
+    if ttl_days == 0:
+        return False  # Never expires
+    fact_date = obs_dict.get("date", "")
+    if not fact_date:
+        return False  # No date = can't determine expiry, keep it
+    try:
+        if len(fact_date) == 7:  # YYYY-MM format
+            fact_date += "-15"  # Approximate to mid-month
+        d = date.fromisoformat(fact_date)
+        return (today - d).days > ttl_days
+    except (ValueError, TypeError):
+        return False
+
+
+def _filter_expired_facts(facts: list[str], config: Config, today: date) -> list[str]:
+    """Remove facts that have exceeded their TTL for context display."""
+    result = []
+    for fact in facts:
+        parsed = parse_observation(fact)
+        if parsed and _is_fact_expired(parsed, config, today):
+            continue
+        result.append(fact)
+    return result
+
+
 def _enrich_entity_natural(
     entity_id: str, entity: GraphEntity, graph: GraphData, memory_path: Path,
+    config: Config | None = None,
 ) -> str:
     """Build a compact enriched dossier for LLM natural context generation.
 
@@ -346,6 +376,8 @@ def _enrich_entity_natural(
         lines.append(f"Summary: {entity.summary}")
     if facts:
         facts = [f for f in facts if "[superseded]" not in f]
+        if config is not None:
+            facts = _filter_expired_facts(facts, config, date.today())
         facts = _deduplicate_facts_for_context(facts, max_per_category=3)
         for f in facts:
             lines.append(f"  {f}")
@@ -387,7 +419,7 @@ def _build_section_llm(
     # Build enriched dossier
     dossier_parts = []
     for eid, entity in entities:
-        dossier_parts.append(_enrich_entity_natural(eid, entity, graph, memory_path))
+        dossier_parts.append(_enrich_entity_natural(eid, entity, graph, memory_path, config=config))
     raw_dossier = "\n\n".join(dossier_parts)
 
     # RAG pre-fetch
@@ -423,6 +455,7 @@ def _build_section_llm(
 
 def _enrich_entity(
     entity_id: str, entity: GraphEntity, graph: GraphData, memory_path: Path,
+    config: Config | None = None,
 ) -> str:
     """Build an enriched dossier string for a single entity.
 
@@ -450,6 +483,8 @@ def _enrich_entity(
         is_ai_self = entity.type == "ai_self"
         max_cat = 3 if is_ai_self else 5
         facts = [f for f in facts if "[superseded]" not in f]
+        if config is not None:
+            facts = _filter_expired_facts(facts, config, date.today())
         sorted_facts = _sort_facts_by_date(facts)
         sorted_facts = _deduplicate_facts_for_context(sorted_facts, max_per_category=max_cat)
         # Group by category for cleaner output
@@ -501,12 +536,13 @@ def _collect_section(
     graph: GraphData,
     memory_path: Path,
     token_budget: int,
+    config: Config | None = None,
 ) -> str:
     """Collect enriched dossiers for entities, respecting a token budget."""
     parts: list[str] = []
     used = 0
     for eid, entity in entities:
-        dossier = _enrich_entity(eid, entity, graph, memory_path)
+        dossier = _enrich_entity(eid, entity, graph, memory_path, config=config)
         cost = _estimate_tokens(dossier)
         if used + cost > token_budget and parts:
             break
@@ -677,26 +713,26 @@ def build_context(
     ai_personality_parts = []
     for eid, entity in all_top:
         if entity.type == "ai_self":
-            dossier = _enrich_entity(eid, entity, graph, memory_path)
+            dossier = _enrich_entity(eid, entity, graph, memory_path, config=config)
             ai_personality_parts.append(dossier)
             shown_ids.add(eid)
     ai_personality = "\n\n".join(ai_personality_parts) if ai_personality_parts else "No personality data yet."
 
     # Identity
     identity_entities = [(eid, e) for eid, e in all_top if e.file.startswith("self/") and e.type != "ai_self" and eid not in shown_ids]
-    identity_text = _collect_section(identity_entities, graph, memory_path, section_budget("identity"))
+    identity_text = _collect_section(identity_entities, graph, memory_path, section_budget("identity"), config=config)
     for eid, _ in identity_entities:
         shown_ids.add(eid)
 
     # Work context
     work_entities = [(eid, e) for eid, e in all_top if e.type in ("work", "organization") and eid not in shown_ids]
-    work_text = _collect_section(work_entities, graph, memory_path, section_budget("work"))
+    work_text = _collect_section(work_entities, graph, memory_path, section_budget("work"), config=config)
     for eid, _ in work_entities:
         shown_ids.add(eid)
 
     # Personal context
     personal_entities = [(eid, e) for eid, e in all_top if e.type in ("person", "animal", "place") and eid not in shown_ids]
-    personal_text = _collect_section(personal_entities, graph, memory_path, section_budget("personal"))
+    personal_text = _collect_section(personal_entities, graph, memory_path, section_budget("personal"), config=config)
     for eid, _ in personal_entities:
         shown_ids.add(eid)
 
@@ -706,7 +742,7 @@ def build_context(
     top_entities = top_entities[:10]
     # Group by connected component so related entities appear together
     top_entities = _sort_by_cluster(top_entities, graph)
-    top_text = _collect_section(top_entities, graph, memory_path, section_budget("top_of_mind"))
+    top_text = _collect_section(top_entities, graph, memory_path, section_budget("top_of_mind"), config=config)
     for eid, _ in top_entities:
         shown_ids.add(eid)
 
@@ -737,9 +773,9 @@ def build_context(
     history_earlier = [(eid, e) for eid, e in remaining_for_history if thirty_days > e.last_mentioned >= one_year]
     history_longterm = [(eid, e) for eid, e in remaining_for_history if e.last_mentioned < one_year]
 
-    history_recent_text = _collect_section(history_recent, graph, memory_path, section_budget("history_recent"))
-    history_earlier_text = _collect_section(history_earlier, graph, memory_path, section_budget("history_earlier"))
-    history_longterm_text = _collect_section(history_longterm, graph, memory_path, section_budget("history_longterm"))
+    history_recent_text = _collect_section(history_recent, graph, memory_path, section_budget("history_recent"), config=config)
+    history_earlier_text = _collect_section(history_earlier, graph, memory_path, section_budget("history_earlier"), config=config)
+    history_longterm_text = _collect_section(history_longterm, graph, memory_path, section_budget("history_longterm"), config=config)
 
     # Assemble sections (skip empty)
     sections_parts = []
@@ -882,7 +918,7 @@ def build_context_with_llm(
         # Build raw dossier
         dossier_parts = []
         for eid, entity in entities:
-            dossier_parts.append(_enrich_entity(eid, entity, graph, memory_path))
+            dossier_parts.append(_enrich_entity(eid, entity, graph, memory_path, config=config))
             shown_ids.add(eid)
         raw_dossier = "\n\n".join(dossier_parts)
 
