@@ -196,12 +196,6 @@ dream:
   transitive_min_strength: 0.4   # Min relation strength for transitive inference
   transitive_max_new: 20         # Max new transitive relations per dream run
 
-# ── Dream mode ───────────────────────────────────────────────
-dream:
-  faiss_merge_threshold: 0.80      # FAISS similarity threshold for entity dedup candidates
-  faiss_merge_max_candidates: 20   # Max FAISS dedup candidates per dream run
-  dossier_max_facts: 3             # Max facts in dossier for LLM dedup check
-
 # ── Categories ─────────────────────────────────────────────────
 categories:
   observations:
