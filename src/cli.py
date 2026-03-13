@@ -586,20 +586,7 @@ def relations(ctx, entity, dry_run):
 @cli.command()
 @click.pass_context
 def graph(ctx):
-    """Open interactive graph visualization in browser."""
-    config = ctx.obj["config"]
-    from src.memory.graph import load_graph
-    from src.pipeline.visualize import open_graph
-
-    g = load_graph(config.memory_path)
-    output = open_graph(g, config.memory_path)
-    console.print(f"[green]Graph opened: {output}[/green]")
-
-
-@cli.command()
-@click.pass_context
-def dashboard(ctx):
-    """Generate interactive dashboard and open in browser."""
+    """Open interactive dashboard with graph, timeline, dream replay and search."""
     config = ctx.obj["config"]
     from src.pipeline.dashboard import open_dashboard
 
