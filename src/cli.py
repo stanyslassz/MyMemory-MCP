@@ -598,6 +598,17 @@ def graph(ctx):
 
 
 @cli.command()
+@click.pass_context
+def dashboard(ctx):
+    """Generate interactive dashboard and open in browser."""
+    config = ctx.obj["config"]
+    from src.pipeline.dashboard import open_dashboard
+
+    output = open_dashboard(config)
+    console.print(f"[green]✓ Dashboard generated: {output}[/green]")
+
+
+@cli.command()
 @click.option("--last", default=20, help="Show last N actions")
 @click.option("--entity", default=None, help="Filter by entity name")
 @click.option("--action", "action_type", default=None, help="Filter by action type")
