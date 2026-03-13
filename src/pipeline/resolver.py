@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
-
 from src.core.models import (
     GraphData,
     RawExtraction,
@@ -17,7 +15,8 @@ from src.core.utils import slugify
 def resolve_entity(
     name: str,
     graph: GraphData,
-    faiss_search_fn: Optional[Callable] = None,
+    config=None,
+    memory_path=None,
     observation_context: str = "",
 ) -> Resolution:
     """Resolve a free-form entity name against the graph.
@@ -25,11 +24,8 @@ def resolve_entity(
     Resolution order:
     1. Exact match by slug ID
     2. Alias containment check
-    3. FAISS similarity search (if available, context-enriched query)
+    3. FAISS similarity search (if config+memory_path provided)
     4. New entity
-
-    observation_context: optional snippet from observations to disambiguate
-    homonyms (e.g., "Apple" as fruit vs company).
     """
     slug = slugify(name)
 
@@ -48,14 +44,21 @@ def resolve_entity(
         if meta.title.lower() in name_lower or name_lower in meta.title.lower():
             return Resolution(status="resolved", entity_id=entity_id)
 
-    # 3. FAISS similarity search (if available)
-    # Context-aware: enrich query with observation context for better disambiguation
-    if faiss_search_fn is not None:
+    # 3. FAISS similarity search (via rag.search)
+    if config is not None and memory_path is not None:
         try:
+            from src.memory.rag import search as rag_search, SearchOptions
             query = f"{name} {observation_context}".strip() if observation_context else name
-            similar = faiss_search_fn(query, top_k=3, threshold=0.75)
+            similar = rag_search(query, config, memory_path, SearchOptions(
+                top_k=3,
+                use_fts5=False,
+                rerank_actr=False,
+                threshold=config.search.resolver_threshold,
+                deduplicate_entities=False,
+                bump_mentions=False,
+            ))
             if similar:
-                candidates = [s["entity_id"] for s in similar if "entity_id" in s]
+                candidates = [s.entity_id for s in similar]
                 if candidates:
                     return Resolution(status="ambiguous", candidates=candidates)
         except Exception:
@@ -68,18 +71,19 @@ def resolve_entity(
 def resolve_all(
     raw_extraction: RawExtraction,
     graph: GraphData,
-    faiss_search_fn: Optional[Callable] = None,
+    config=None,
+    memory_path=None,
 ) -> ResolvedExtraction:
     """Resolve all entities from a raw extraction."""
     resolved_entities = []
 
     for entity in raw_extraction.entities:
-        # Build observation context for FAISS disambiguation
+        # Build observation context for disambiguation
         obs_context = ""
         if entity.observations:
             obs = entity.observations[0]
             obs_context = f"{obs.category} {obs.content[:50]}"
-        resolution = resolve_entity(entity.name, graph, faiss_search_fn, obs_context)
+        resolution = resolve_entity(entity.name, graph, config, memory_path, obs_context)
         resolved_entities.append(ResolvedEntity(raw=entity, resolution=resolution))
 
     return ResolvedExtraction(
