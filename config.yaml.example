@@ -45,7 +45,6 @@ embeddings:
 memory:
   path: ./memory
   context_max_tokens: 3000
-  context_narrative: false        # Use narrative prose instead of structured sections
   context_budget:
     ai_personality: 8
     identity: 10
@@ -94,7 +93,7 @@ faiss:
 mcp:
   transport: stdio               # stdio (default) or sse
   host: 0.0.0.0                  # SSE bind address (only when transport=sse)
-  port: 8765                     # SSE port (only when transport=sse)
+  port: 8000                     # SSE port (only when transport=sse)
 
 # ── Prompts ────────────────────────────────────────────────────
 prompts:
@@ -154,10 +153,24 @@ context:
   top_entities_count: 50
   top_of_mind_limit: 15
   available_entities_limit: 30
+  reserved_tokens_natural: 500
+  reserved_tokens_structured: 500
+  min_budget_tokens: 500
+  default_budget_pct: 20
+  rag_chunk_preview_len: 200
+  max_rag_results: 15
+  max_vigilance_items: 15
   max_facts_per_category: 5
   max_facts_per_category_ai_self: 3
+  fact_dedup_threshold: 0.35
   min_rel_strength: 0.3
   max_rel_age_days: 365
+
+# ── Dream mode ───────────────────────────────────────────────
+dream:
+  faiss_merge_threshold: 0.80      # FAISS similarity threshold for entity dedup candidates
+  faiss_merge_max_candidates: 20   # Max FAISS dedup candidates per dream run
+  dossier_max_facts: 3             # Max facts in dossier for LLM dedup check
 
 # ── Categories ─────────────────────────────────────────────────
 categories:

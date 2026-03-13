@@ -17,7 +17,6 @@ def _make_config(tmp_path):
     config.context_budget = {"identity": 10, "top_of_mind": 25}
     config.user_language = "fr"
     config.prompts_path = tmp_path / "prompts"
-    config.context_narrative = False
     config.ctx = ContextConfig()
     config.fact_ttl = FactTTLConfig()
     return config

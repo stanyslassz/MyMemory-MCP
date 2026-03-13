@@ -128,6 +128,14 @@ class FactTTLConfig:
 
 
 @dataclass
+class DreamConfig:
+    """Parameters for dream mode step 4 (entity merging)."""
+    faiss_merge_threshold: float = 0.80
+    faiss_merge_max_candidates: int = 20
+    dossier_max_facts: int = 3
+
+
+@dataclass
 class ContextConfig:
     """Parameters for context generation (builder + formatter)."""
     reserved_tokens_natural: int = 500
@@ -176,7 +184,7 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
     ctx: ContextConfig = field(default_factory=ContextConfig)
-    context_narrative: bool = False
+    dream: DreamConfig = field(default_factory=DreamConfig)
     context_llm_sections: bool = False
     context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
     max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})
@@ -251,6 +259,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     search_cfg = raw.get("search", {})
     ttl_cfg = raw.get("fact_ttl", {})
     ctx_cfg = raw.get("context", {})
+    dream_cfg = raw.get("dream", {})
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -272,7 +281,6 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         memory_path=memory_path,
         context_max_tokens=mem.get("context_max_tokens", 3000),
         context_budget=mem.get("context_budget", {}),
-        context_narrative=mem.get("context_narrative", False),
         context_llm_sections=mem.get("context_llm_sections", False),
         context_format=mem.get("context_format", "structured"),
         max_facts=raw.get("max_facts", {"default": 50, "ai_self": 20}),
@@ -339,4 +347,5 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         ),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
         ctx=ContextConfig(**{k: v for k, v in ctx_cfg.items() if hasattr(ContextConfig, k)}),
+        dream=DreamConfig(**{k: v for k, v in dream_cfg.items() if hasattr(DreamConfig, k)}),
     )

@@ -28,7 +28,7 @@
 
 ### CRITICAL — Crash ou résultats faux
 
-#### C1. Attribut `config.dream` inexistant (Agent 4)
+#### C1. ~~Attribut `config.dream` inexistant~~ FIXED (Agent 4)
 
 **Fichier** : `src/pipeline/dream/merger.py`
 **Accès invalides** :
@@ -44,7 +44,7 @@
 
 ### SIGNIFICANT — Fonctionne mais de manière dégradée ou inattendue
 
-#### S1. Port MCP : valeur par défaut incohérente (Agent 4)
+#### S1. ~~Port MCP : valeur par défaut incohérente~~ FIXED (Agent 4)
 
 | Source | Valeur |
 |--------|--------|
@@ -60,11 +60,11 @@
 
 **Impact** : Si le template est lu depuis le fichier (pas le fallback inline), le placeholder `{user_language_name}` reste non-résolu dans le contexte généré.
 
-#### S3. Champ `context_llm_sections` absent de config.yaml.example (Agent 4)
+#### S3. ~~Champ `context_llm_sections` absent de config.yaml.example~~ FIXED (Agent 4)
 
 **Impact** : Fonctionnalité non documentée pour l'utilisateur. Le champ existe dans `Config` mais pas dans l'exemple.
 
-#### S4. Champs ContextConfig absents de config.yaml.example (Agent 4)
+#### S4. ~~Champs ContextConfig absents de config.yaml.example~~ FIXED (Agent 4)
 
 Champs manquants dans l'exemple :
 - `reserved_tokens_natural` (défaut: 500)
@@ -79,12 +79,12 @@ Champs manquants dans l'exemple :
 
 ### MINOR — Cosmétique, performance, maintenabilité
 
-#### M1. Champ mort `context_narrative` (Agent 4)
+#### M1. ~~Champ mort `context_narrative`~~ FIXED (Agent 4)
 
 **Fichier** : `config.py` → `context_narrative: bool = False`
 **Usage** : Jamais référencé dans le code. Remplacé par `context_format` ("structured" | "natural").
 
-#### M2. Prompts morts dans le répertoire `prompts/` (Agent 3)
+#### M2. ~~Prompts morts dans le répertoire `prompts/`~~ FIXED (Agent 3)
 
 | Fichier | Raison |
 |---------|--------|
