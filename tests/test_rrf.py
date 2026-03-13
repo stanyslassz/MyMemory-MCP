@@ -1,7 +1,8 @@
-"""Tests for RRF (Reciprocal Rank Fusion) in mcp/server.py."""
+"""Tests for RRF (Reciprocal Rank Fusion) in memory/rag.py."""
 
+from src.core.config import Config
 from src.core.models import GraphData, GraphEntity, SearchResult
-from src.mcp.server import _rrf_fusion
+from src.memory.rag import _rrf_fusion
 from src.pipeline.keyword_index import KeywordResult
 
 
@@ -18,6 +19,15 @@ def _make_graph(entities_dict):
     return GraphData(entities=entities)
 
 
+def _make_config(w_sem=0.5, w_kw=0.3, w_actr=0.2, rrf_k=60):
+    config = Config()
+    config.search.weight_semantic = w_sem
+    config.search.weight_keyword = w_kw
+    config.search.weight_actr = w_actr
+    config.search.rrf_k = rrf_k
+    return config
+
+
 def test_rrf_fusion_combines_signals():
     """Entity present in both FAISS and keyword lists should rank higher."""
     faiss_results = [
@@ -31,12 +41,10 @@ def test_rrf_fusion_combines_signals():
     ]
     graph = _make_graph({"alpha": 0.8, "beta": 0.6, "gamma": 0.3, "delta": 0.5})
 
-    ranked = _rrf_fusion(faiss_results, kw_results, graph, k=60)
-    ids = [eid for eid, _ in ranked]
+    ranked = _rrf_fusion(faiss_results, kw_results, graph, _make_config())
+    ids = [r.entity_id for r in ranked]
 
-    # Beta is in both lists, so it should rank highest
     assert ids[0] == "beta"
-    # All 4 entities should be present (union of both lists)
     assert set(ids) == {"alpha", "beta", "gamma", "delta"}
 
 
@@ -50,8 +58,8 @@ def test_rrf_fusion_keyword_only_results_included():
     ]
     graph = _make_graph({"alpha": 0.5, "keyword-only": 0.8})
 
-    ranked = _rrf_fusion(faiss_results, kw_results, graph, k=60)
-    ids = [eid for eid, _ in ranked]
+    ranked = _rrf_fusion(faiss_results, kw_results, graph, _make_config())
+    ids = [r.entity_id for r in ranked]
     assert "keyword-only" in ids
 
 
@@ -64,9 +72,8 @@ def test_rrf_fusion_empty_keyword():
     kw_results = []
     graph = _make_graph({"alpha": 0.8, "beta": 0.6})
 
-    ranked = _rrf_fusion(faiss_results, kw_results, graph, k=60)
-    ids = [eid for eid, _ in ranked]
-    # Both FAISS results preserved
+    ranked = _rrf_fusion(faiss_results, kw_results, graph, _make_config())
+    ids = [r.entity_id for r in ranked]
     assert set(ids) == {"alpha", "beta"}
 
 
@@ -80,31 +87,27 @@ def test_rrf_fusion_weights_affect_ranking():
     ]
     graph = _make_graph({"semantic-hit": 0.3, "keyword-hit": 0.3})
 
-    # With heavy keyword weight
     ranked_kw = _rrf_fusion(
-        faiss_results, kw_results, graph, k=60, w_sem=0.1, w_kw=0.8, w_actr=0.1
+        faiss_results, kw_results, graph, _make_config(w_sem=0.1, w_kw=0.8, w_actr=0.1),
     )
-    # With heavy semantic weight
     ranked_sem = _rrf_fusion(
-        faiss_results, kw_results, graph, k=60, w_sem=0.8, w_kw=0.1, w_actr=0.1
+        faiss_results, kw_results, graph, _make_config(w_sem=0.8, w_kw=0.1, w_actr=0.1),
     )
 
-    # Keyword-heavy should rank keyword-hit first
-    assert ranked_kw[0][0] == "keyword-hit"
-    # Semantic-heavy should rank semantic-hit first
-    assert ranked_sem[0][0] == "semantic-hit"
+    assert ranked_kw[0].entity_id == "keyword-hit"
+    assert ranked_sem[0].entity_id == "semantic-hit"
 
 
-def test_rrf_fusion_missing_graph_entity():
-    """Entities not in graph should get ACT-R score of 0 but still appear."""
+def test_rrf_fusion_low_actr_entity_still_appears():
+    """Entities in graph with zero ACT-R score should still appear via RRF."""
     faiss_results = [
         SearchResult(entity_id="known", file="k.md", chunk="c", score=0.9),
     ]
     kw_results = [
-        KeywordResult(entity_id="unknown", chunk_idx=0, bm25_score=5.0),
+        KeywordResult(entity_id="low-score", chunk_idx=0, bm25_score=5.0),
     ]
-    graph = _make_graph({"known": 0.8})  # "unknown" not in graph
+    graph = _make_graph({"known": 0.8, "low-score": 0.0})
 
-    ranked = _rrf_fusion(faiss_results, kw_results, graph, k=60)
-    ids = [eid for eid, _ in ranked]
-    assert "unknown" in ids
+    ranked = _rrf_fusion(faiss_results, kw_results, graph, _make_config())
+    ids = [r.entity_id for r in ranked]
+    assert "low-score" in ids

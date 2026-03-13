@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from collections import defaultdict
 from datetime import date as date_cls
 from pathlib import Path
 
@@ -23,10 +22,6 @@ from src.memory.store import (
     parse_observation,
     format_observation,
 )
-from src.pipeline.indexer import search as faiss_search
-
-from src.core.models import SearchResult
-
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("memory-ai")
@@ -115,47 +110,6 @@ def save_chat(messages: list[dict]) -> dict:
     return {"status": "saved", "file": str(rel_path)}
 
 
-def _rrf_fusion(
-    faiss_results: list[SearchResult],
-    keyword_results,
-    graph,
-    k: int = 60,
-    w_sem: float = 0.5,
-    w_kw: float = 0.3,
-    w_actr: float = 0.2,
-) -> list[tuple[str, float]]:
-    """Reciprocal Rank Fusion combining semantic, keyword, and ACT-R signals.
-
-    Returns list of (entity_id, rrf_score) sorted descending.
-    """
-    sem_ranks = {r.entity_id: i + 1 for i, r in enumerate(faiss_results)}
-    kw_ranks = {r.entity_id: i + 1 for i, r in enumerate(keyword_results)}
-
-    all_ids = set(sem_ranks) | set(kw_ranks)
-
-    # ACT-R ranking
-    actr_scores = {}
-    for eid in all_ids:
-        e = graph.entities.get(eid)
-        actr_scores[eid] = e.score if e else 0.0
-    sorted_actr = sorted(actr_scores.items(), key=lambda x: x[1], reverse=True)
-    actr_ranks = {eid: i + 1 for i, (eid, _) in enumerate(sorted_actr)}
-
-    # Default rank for missing entries — penalises absent signals
-    default_rank = max(len(faiss_results), len(keyword_results), len(all_ids)) + 10
-
-    scored = []
-    for eid in all_ids:
-        sr = sem_ranks.get(eid, default_rank)
-        kr = kw_ranks.get(eid, default_rank)
-        ar = actr_ranks.get(eid, default_rank)
-
-        score = w_sem / (k + sr) + w_kw / (k + kr) + w_actr / (k + ar)
-        scored.append((eid, score))
-
-    return sorted(scored, key=lambda x: x[1], reverse=True)
-
-
 @mcp.tool()
 def search_rag(query: str) -> dict:
     """Search the user's memory for specific information using semantic + keyword search.
@@ -186,143 +140,27 @@ def search_rag(query: str) -> dict:
     config = _get_config()
     memory_path = config.memory_path
 
-    # FAISS search — graceful fallback if index doesn't exist
+    from src.memory.rag import search as rag_search, SearchOptions
+    results = rag_search(query, config, memory_path, SearchOptions(
+        expand_relations=True,
+        bump_mentions=True,
+    ))
+
+    # Format results for MCP output — load graph once for title/type enrichment
     try:
-        results = faiss_search(query, config, memory_path)
+        from src.memory.graph import load_graph as _load_graph
+        graph = _load_graph(memory_path)
     except Exception:
-        logger.warning("FAISS search failed for query %r, returning empty results", query, exc_info=True)
-        return {"query": query, "results": [], "total": 0}
-
-    # Enrich with graph relations — graceful fallback if graph fails
-    try:
-        graph = load_graph(memory_path)
-    except Exception:
-        logger.warning("Failed to load graph, returning results without enrichment", exc_info=True)
-        enriched_results = [
-            {
-                "entity_id": r.entity_id,
-                "file": r.file,
-                "score": r.score,
-                "title": r.entity_id,
-                "type": "unknown",
-                "relations": [],
-            }
-            for r in results
-        ]
-        return {"query": query, "results": enriched_results, "total": len(enriched_results)}
-
-    # Hybrid re-ranking: RRF (semantic + keyword + ACT-R) when FTS index exists
-    fts_db_path = memory_path / config.search.fts_db_path
-    if config.search.hybrid_enabled and fts_db_path.exists():
-        from src.pipeline.keyword_index import search_keyword
-
-        kw_results = search_keyword(query, fts_db_path, top_k=config.faiss.top_k * 2)
-        if kw_results:
-            ranked = _rrf_fusion(
-                results,
-                kw_results,
-                graph,
-                k=config.search.rrf_k,
-                w_sem=config.search.weight_semantic,
-                w_kw=config.search.weight_keyword,
-                w_actr=config.search.weight_actr,
-            )
-            # Build lookup from existing FAISS results
-            result_map = {r.entity_id: r for r in results}
-            # Add keyword-only results (not found by FAISS)
-            for eid, _score in ranked:
-                if eid not in result_map and eid in graph.entities:
-                    e = graph.entities[eid]
-                    result_map[eid] = SearchResult(
-                        entity_id=eid,
-                        file=e.file,
-                        chunk="[keyword match]",
-                        score=0.0,
-                    )
-            reranked = []
-            for eid, rrf_score in ranked:
-                if eid in result_map:
-                    r = result_map[eid]
-                    r.score = rrf_score
-                    reranked.append(r)
-            results = reranked[: config.faiss.top_k]
-        else:
-            # No keyword matches — fall back to linear re-ranking
-            for result in results:
-                entity = graph.entities.get(result.entity_id)
-                graph_score = entity.score if entity else 0.0
-                result.score = result.score * 0.6 + graph_score * 0.4
-            results.sort(key=lambda r: r.score, reverse=True)
-    else:
-        # No FTS index or hybrid disabled — original linear re-ranking
-        for result in results:
-            entity = graph.entities.get(result.entity_id)
-            graph_score = entity.score if entity else 0.0
-            result.score = result.score * 0.6 + graph_score * 0.4
-        results.sort(key=lambda r: r.score, reverse=True)
-
-    # Build adjacency dict once for O(1) per-entity relation lookup
-    adjacency = defaultdict(list)
-    for rel in graph.relations:
-        adjacency[rel.from_entity].append(("outgoing", rel))
-        adjacency[rel.to_entity].append(("incoming", rel))
+        graph = None
 
     enriched_results = []
-
     for result in results:
-        entity = graph.entities.get(result.entity_id)
-        relations = []
-        if entity:
-            for direction, rel in adjacency.get(result.entity_id, []):
-                if direction == "outgoing":
-                    target = graph.entities.get(rel.to_entity)
-                    if target:
-                        relations.append({
-                            "type": rel.type,
-                            "target": target.title,
-                            "target_id": rel.to_entity,
-                        })
-                else:
-                    source = graph.entities.get(rel.from_entity)
-                    if source:
-                        relations.append({
-                            "type": rel.type,
-                            "source": source.title,
-                            "source_id": rel.from_entity,
-                        })
-
-        enriched_results.append({
-            "entity_id": result.entity_id,
-            "file": result.file,
-            "score": result.score,
-            "title": entity.title if entity else result.entity_id,
-            "type": entity.type if entity else "unknown",
-            "relations": relations,
-        })
-
-    # L2→L1 re-emergence: bump mention_dates for retrieved entities
-    # Scores are recalculated during `memory run` / `memory dream`, not per query.
-    from datetime import date as date_type
-    from src.memory.mentions import add_mention
-
-    today = date_type.today().isoformat()
-    promoted = False
-    for result in results:
-        entity_id = result.entity_id
-        if entity_id in graph.entities:
-            entity = graph.entities[entity_id]
-            entity.mention_dates, entity.monthly_buckets = add_mention(
-                today, entity.mention_dates, entity.monthly_buckets,
-                window_size=config.scoring.window_size,
-            )
-            entity.last_mentioned = today
-            promoted = True
-
-    if promoted:
-        try:
-            save_graph(memory_path, graph)
-        except RuntimeError:
-            logger.warning("Could not save graph after L2→L1 bump (locked by another process)")
+        entity_data = {"entity_id": result.entity_id, "file": result.file, "score": result.score}
+        entity = graph.entities.get(result.entity_id) if graph else None
+        entity_data["title"] = entity.title if entity else result.entity_id
+        entity_data["type"] = entity.type if entity else "unknown"
+        entity_data["relations"] = getattr(result, "relations", [])
+        enriched_results.append(entity_data)
 
     return {
         "query": query,
