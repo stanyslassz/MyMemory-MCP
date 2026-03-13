@@ -64,7 +64,7 @@ class TestMCPToolListing:
         config = _make_config(tmp_path)
         init_memory_structure(tmp_path)
         with patch("src.mcp.server._get_config", return_value=config), \
-             patch("src.mcp.server.faiss_search", return_value=[]):
+             patch("src.memory.rag.search", return_value=[]):
             from src.mcp.server import search_rag
             result = search_rag("test")
         assert isinstance(result, dict)
@@ -89,7 +89,7 @@ class TestMCPErrorShapes:
         config = _make_config(tmp_path)
         init_memory_structure(tmp_path)
         with patch("src.mcp.server._get_config", return_value=config), \
-             patch("src.mcp.server.faiss_search", return_value=[]):
+             patch("src.memory.rag.search", return_value=[]):
             from src.mcp.server import search_rag
             result = search_rag("nonexistent query")
         assert result["total"] == 0
@@ -102,7 +102,7 @@ class TestMCPErrorShapes:
             SearchResult(entity_id="test", file="moi/test.md", chunk="[chunk 0]", score=0.5),
         ]
         with patch("src.mcp.server._get_config", return_value=config), \
-             patch("src.mcp.server.faiss_search", return_value=mock_results):
+             patch("src.memory.rag.search", return_value=mock_results):
             from src.mcp.server import search_rag
             result = search_rag("test")
 

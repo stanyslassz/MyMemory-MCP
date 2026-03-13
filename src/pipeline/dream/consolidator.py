@@ -23,7 +23,7 @@ def _step_extract_documents(
     from src.pipeline.extractor import extract_from_chat, sanitize_extraction
     from src.pipeline.resolver import resolve_all
     from src.pipeline.enricher import enrich_memory
-    from src.pipeline.orchestrator import make_faiss_fn
+    # Config import already available via function parameter
     import pickle
 
     docs = list_unextracted_docs(config.faiss.manifest_path)
@@ -68,7 +68,7 @@ def _step_extract_documents(
             extraction = sanitize_extraction(extraction)
 
             if extraction.entities:
-                resolved = resolve_all(extraction, graph, faiss_search_fn=make_faiss_fn(config, memory_path))
+                resolved = resolve_all(extraction, graph, config=config, memory_path=memory_path)
                 enrich_memory(resolved, config)
                 console.print(f"    [green]{len(extraction.entities)} entities extracted[/green]")
 
