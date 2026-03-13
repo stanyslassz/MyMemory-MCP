@@ -145,14 +145,6 @@ class FactTTLConfig:
 
 
 @dataclass
-class DreamConfig:
-    """Parameters for dream mode step 4 (entity merging)."""
-    faiss_merge_threshold: float = 0.80
-    faiss_merge_max_candidates: int = 20
-    dossier_max_facts: int = 3
-
-
-@dataclass
 class ContextConfig:
     """Parameters for context generation (builder + formatter)."""
     reserved_tokens_natural: int = 500
@@ -277,7 +269,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     search_cfg = raw.get("search", {})
     ttl_cfg = raw.get("fact_ttl", {})
     ctx_cfg = raw.get("context", {})
-    dream_cfg = raw.get("dream", {})
+
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
     prompts_path = _resolve_path(project_root, raw.get("prompts", {}).get("path", "./prompts"))
@@ -371,5 +363,4 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         dream=DreamConfig(**{k: v for k, v in raw.get("dream", {}).items() if hasattr(DreamConfig, k)}),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
         ctx=ContextConfig(**{k: v for k, v in ctx_cfg.items() if hasattr(ContextConfig, k)}),
-        dream=DreamConfig(**{k: v for k, v in dream_cfg.items() if hasattr(DreamConfig, k)}),
     )
