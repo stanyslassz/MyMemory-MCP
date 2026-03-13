@@ -56,6 +56,8 @@ class ScoringConfig:
     window_size: int = 50
     min_score_for_context: float = 0.3
     max_spreading_neighbors: int = 10
+    ltd_onset_days: int = 90
+    min_relation_strength: float = 0.1
 
 
 @dataclass
@@ -103,6 +105,21 @@ class SearchConfig:
     weight_keyword: float = 0.3
     weight_actr: float = 0.2
     fts_db_path: str = "_memory_fts.db"
+    resolver_threshold: float = 0.75
+    linear_faiss_weight: float = 0.6
+    linear_actr_weight: float = 0.4
+
+
+@dataclass
+class DreamConfig:
+    faiss_merge_threshold: float = 0.80
+    faiss_merge_max_candidates: int = 20
+    dossier_max_facts: int = 3
+    prune_score_threshold: float = 0.1
+    prune_min_age_days: int = 90
+    prune_max_frequency: int = 1
+    transitive_min_strength: float = 0.4
+    transitive_max_new: int = 20
 
 
 @dataclass
@@ -153,6 +170,7 @@ class ContextConfig:
     fact_dedup_threshold: float = 0.35
     min_rel_strength: float = 0.3
     max_rel_age_days: int = 365
+    history_recent_days: int = 30
 
 
 @dataclass
@@ -182,6 +200,7 @@ class Config:
     ingest: IngestConfig = field(default_factory=IngestConfig)
     nlp: NLPConfig = field(default_factory=NLPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    dream: DreamConfig = field(default_factory=DreamConfig)
     fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
     ctx: ContextConfig = field(default_factory=ContextConfig)
     dream: DreamConfig = field(default_factory=DreamConfig)
@@ -301,6 +320,8 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             window_size=scoring.get("window_size", 50),
             min_score_for_context=scoring.get("min_score_for_context", 0.3),
             max_spreading_neighbors=scoring.get("max_spreading_neighbors", 10),
+            ltd_onset_days=scoring.get("ltd_onset_days", 90),
+            min_relation_strength=scoring.get("min_relation_strength", 0.1),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),
@@ -344,7 +365,11 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             weight_keyword=search_cfg.get("weight_keyword", 0.3),
             weight_actr=search_cfg.get("weight_actr", 0.2),
             fts_db_path=search_cfg.get("fts_db_path", "_memory_fts.db"),
+            resolver_threshold=search_cfg.get("resolver_threshold", 0.75),
+            linear_faiss_weight=search_cfg.get("linear_faiss_weight", 0.6),
+            linear_actr_weight=search_cfg.get("linear_actr_weight", 0.4),
         ),
+        dream=DreamConfig(**{k: v for k, v in raw.get("dream", {}).items() if hasattr(DreamConfig, k)}),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
         ctx=ContextConfig(**{k: v for k, v in ctx_cfg.items() if hasattr(ContextConfig, k)}),
         dream=DreamConfig(**{k: v for k, v in dream_cfg.items() if hasattr(DreamConfig, k)}),
