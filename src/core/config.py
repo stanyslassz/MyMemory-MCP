@@ -203,7 +203,6 @@ class Config:
     dream: DreamConfig = field(default_factory=DreamConfig)
     fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
     ctx: ContextConfig = field(default_factory=ContextConfig)
-    dream: DreamConfig = field(default_factory=DreamConfig)
     context_llm_sections: bool = False
     context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
     max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})

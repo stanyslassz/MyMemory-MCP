@@ -61,11 +61,19 @@ def build_natural_context(
     selected = _select_entities_for_natural(all_top, graph)
 
     # AI Personality
-    ai_parts = []
-    for eid, e in selected:
-        if e.type == "ai_self":
-            ai_parts.append(_build_natural_bullet(eid, e, graph, memory_path))
-    ai_personality = "\n".join(ai_parts) if ai_parts else ""
+    ai_entities = [(eid, e) for eid, e in selected if e.type == "ai_self"]
+    if ai_entities:
+        pct = budget.get("ai_personality", 8)
+        sb = int(total_budget * pct / 100)
+        if use_llm:
+            ai_personality = _build_section_llm("AI Personality", ai_entities, graph, memory_path, config, sb)
+        else:
+            ai_parts = []
+            for eid, e in ai_entities:
+                ai_parts.append(_build_natural_bullet(eid, e, graph, memory_path))
+            ai_personality = "\n".join(ai_parts)
+    else:
+        ai_personality = ""
 
     # Classify temporally (excluding ai_self)
     long_term: list[tuple[str, GraphEntity]] = []
