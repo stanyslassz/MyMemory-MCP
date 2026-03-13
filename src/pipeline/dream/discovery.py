@@ -128,14 +128,16 @@ def _step_transitive_relations(
     console: Console,
     report,
     dry_run: bool,
-    min_strength: float = 0.4,
-    max_new: int = 20,
+    min_strength: float | None = None,
+    max_new: int | None = None,
 ) -> None:
     """Step 6: Infer transitive relations (deterministic, no LLM).
 
     For each triple (A->rel1->B, B->rel2->C) where A and C have no direct relation,
     apply transitive rules to create inferred relations with reduced strength.
     """
+    min_strength = min_strength if min_strength is not None else config.dream.transitive_min_strength
+    max_new = max_new if max_new is not None else config.dream.transitive_max_new
     from src.memory.graph import add_relation, save_graph
 
     # Build adjacency: entity -> list of (target, relation)

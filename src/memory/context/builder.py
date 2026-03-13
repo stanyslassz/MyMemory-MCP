@@ -236,7 +236,8 @@ def build_context(
     vigilance_text = "\n".join(vigilance_parts)
 
     # Brief history — split by timeline
-    thirty_days = (today - timedelta(days=30)).isoformat()
+    history_recent_days = config.ctx.history_recent_days
+    thirty_days = (today - timedelta(days=history_recent_days)).isoformat()
     one_year = (today - timedelta(days=365)).isoformat()
 
     remaining_for_history = [(eid, e) for eid, e in all_top if eid not in shown_ids]

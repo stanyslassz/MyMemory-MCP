@@ -971,11 +971,14 @@ def _step_prune_dead(
     console: Console,
     report: DreamReport,
     dry_run: bool,
-    score_threshold: float = 0.1,
-    max_frequency: int = 1,
-    min_age_days: int = 90,
+    score_threshold: float | None = None,
+    max_frequency: int | None = None,
+    min_age_days: int | None = None,
 ) -> None:
     """Step 7: Archive low-score orphan entities."""
+    score_threshold = score_threshold if score_threshold is not None else config.dream.prune_score_threshold
+    max_frequency = max_frequency if max_frequency is not None else config.dream.prune_max_frequency
+    min_age_days = min_age_days if min_age_days is not None else config.dream.prune_min_age_days
     today = date.today()
 
     # Build set of entities that have relations

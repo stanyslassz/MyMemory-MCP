@@ -202,9 +202,9 @@ def _apply_ltd(graph: GraphData, config: Config, today: date) -> None:
             days = (today - d).days
         except (ValueError, TypeError):
             continue
-        if days > 90:
+        if days > s.ltd_onset_days:
             decay = math.exp(-days / s.relation_ltd_halflife)
-            rel.strength = round(max(0.1, rel.strength * decay), 4)
+            rel.strength = round(max(s.min_relation_strength, rel.strength * decay), 4)
 
 
 def _upgrade_retention(graph: GraphData, today: date) -> None:
