@@ -304,7 +304,7 @@ def _rag_prefetch(
     Gracefully returns empty string if FAISS is unavailable.
     """
     try:
-        from src.pipeline.indexer import search as faiss_search
+        from src.memory.rag import search as rag_search, SearchOptions
     except ImportError:
         return ""
 
@@ -316,7 +316,9 @@ def _rag_prefetch(
         if not entity:
             continue
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=max_results_per_entity)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=max_results_per_entity, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
             for r in results:
                 # Skip self-references and duplicates
                 if r.entity_id in entity_ids or r.chunk in seen_chunks:

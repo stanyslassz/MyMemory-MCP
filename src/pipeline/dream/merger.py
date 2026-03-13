@@ -26,7 +26,7 @@ def _find_faiss_dedup_candidates(
     These candidates require LLM confirmation before merging.
     """
     try:
-        from src.pipeline.indexer import search as faiss_search
+        from src.memory.rag import search as rag_search, SearchOptions
     except Exception:
         return []
 
@@ -41,7 +41,9 @@ def _find_faiss_dedup_candidates(
             continue
 
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=5)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
 

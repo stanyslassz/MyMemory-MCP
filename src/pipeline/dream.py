@@ -422,7 +422,6 @@ def _step_extract_documents(
     from src.pipeline.extractor import extract_from_chat, sanitize_extraction
     from src.pipeline.resolver import resolve_all
     from src.pipeline.enricher import enrich_memory
-    from src.pipeline.orchestrator import make_faiss_fn
     import pickle
 
     docs = list_unextracted_docs(config.faiss.manifest_path)
@@ -467,7 +466,7 @@ def _step_extract_documents(
             extraction = sanitize_extraction(extraction)
 
             if extraction.entities:
-                resolved = resolve_all(extraction, graph, faiss_search_fn=make_faiss_fn(config, memory_path))
+                resolved = resolve_all(extraction, graph, config=config, memory_path=memory_path)
                 enrich_memory(resolved, config)
                 console.print(f"    [green]{len(extraction.entities)} entities extracted[/green]")
 
@@ -533,7 +532,7 @@ def _find_faiss_dedup_candidates(
     These candidates require LLM confirmation before merging.
     """
     try:
-        from src.pipeline.indexer import search as faiss_search
+        from src.memory.rag import search as rag_search, SearchOptions
     except Exception:
         return []
 
@@ -548,7 +547,9 @@ def _find_faiss_dedup_candidates(
             continue
 
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=5)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
 
@@ -759,7 +760,7 @@ def _step_discover_relations(
     dry_run: bool,
 ) -> None:
     """Step 5: Use FAISS similarity + LLM to discover new relations."""
-    from src.pipeline.indexer import search as faiss_search
+    from src.memory.rag import search as rag_search, SearchOptions
     from src.memory.graph import add_relation, save_graph
 
     # Build existing relation set for fast lookup
@@ -774,7 +775,9 @@ def _step_discover_relations(
     for eid in entity_ids:
         entity = graph.entities[eid]
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=5)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
 

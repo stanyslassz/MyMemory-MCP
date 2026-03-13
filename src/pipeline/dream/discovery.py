@@ -36,7 +36,7 @@ def _step_discover_relations(
     dry_run: bool,
 ) -> None:
     """Step 5: Use FAISS similarity + LLM to discover new relations."""
-    from src.pipeline.indexer import search as faiss_search
+    from src.memory.rag import search as rag_search, SearchOptions
     from src.memory.graph import add_relation, save_graph
     from src.pipeline.dream.merger import _build_dossier
 
@@ -52,7 +52,9 @@ def _step_discover_relations(
     for eid in entity_ids:
         entity = graph.entities[eid]
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=5)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
 
