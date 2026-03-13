@@ -49,6 +49,16 @@ embeddings:
 memory:
   path: ./memory
   context_max_tokens: 3000
+  # Mode de génération du _context.md :
+  #   structured = template déterministe avec dossiers enrichis (zéro LLM)
+  #   natural    = prose compacte style conversation (zéro LLM par défaut)
+  context_format: structured
+  # Active la génération LLM par section (compatible structured ET natural) :
+  #   false = 100% déterministe, aucun appel LLM
+  #   true  = chaque section est reformulée par le LLM (utilise llm.context)
+  # En mode natural+true : le LLM génère des phrases fluides par section
+  # En mode structured+true : le LLM nettoie les dossiers bruts par section
+  context_llm_sections: false
   context_budget:
     ai_personality: 8
     identity: 10
