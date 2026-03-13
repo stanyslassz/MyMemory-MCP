@@ -17,6 +17,50 @@ from src.core.models import SearchResult
 
 logger = logging.getLogger(__name__)
 
+# ── spaCy integration for sentence-aware chunking ──────────────
+_spacy_nlp_cache: dict[str, Any] = {}
+
+SPACY_MODELS = {
+    "fr": "fr_core_news_sm",
+    "en": "en_core_web_sm",
+    "de": "de_core_news_sm",
+    "es": "es_core_news_sm",
+    "it": "it_core_news_sm",
+    "pt": "pt_core_news_sm",
+    "nl": "nl_core_news_sm",
+    "zh": "zh_core_web_sm",
+}
+
+
+def _get_spacy_nlp(language: str = "en"):
+    """Load spaCy model with auto-download fallback. Returns None if spaCy not installed."""
+    if language in _spacy_nlp_cache:
+        return _spacy_nlp_cache[language]
+    try:
+        import spacy
+        model_name = SPACY_MODELS.get(language, "en_core_web_sm")
+        try:
+            nlp = spacy.load(model_name)
+        except OSError:
+            logger.info("spaCy model %s not found, downloading...", model_name)
+            spacy.cli.download(model_name)
+            nlp = spacy.load(model_name)
+        _spacy_nlp_cache[language] = nlp
+        return nlp
+    except ImportError:
+        return None
+    except Exception:
+        # Network failure during download, air-gapped env, etc.
+        return None
+
+
+def _split_sentences_regex(text: str) -> list[str]:
+    """Fallback sentence splitter using regex."""
+    import re
+    parts = re.split(r'(?<=[.!?])\s+', text)
+    return [p for p in parts if p.strip()]
+
+
 # Lazy-loaded globals
 _embedding_model = None
 _embedding_model_name = None
@@ -83,26 +127,85 @@ def get_embedding_fn(config: Config):
         raise ValueError(f"Unknown embedding provider: {provider}")
 
 
-def chunk_text(text: str, chunk_size: int = 400, overlap: int = 80) -> list[str]:
-    """Split text into overlapping chunks by approximate token count (words/1.3)."""
-    words = text.split()
-    approx_tokens_per_word = 1.3
-    words_per_chunk = int(chunk_size / approx_tokens_per_word)
-    words_overlap = int(overlap / approx_tokens_per_word)
+def chunk_text(text: str, chunk_size: int = 400, overlap: int = 80,
+               language: str = "en") -> list[str]:
+    """Split text into overlapping chunks by sentence boundaries.
 
-    if len(words) <= words_per_chunk:
+    Uses spaCy for sentence segmentation when available, falls back to regex.
+    """
+    if not text.strip():
+        return []
+
+    def _tok(t: str) -> int:
+        """Estimate token count: ~4 chars per token."""
+        return max(1, len(t) // 4)
+
+    # Get sentences (spaCy or regex fallback)
+    nlp = _get_spacy_nlp(language)
+    if nlp is not None:
+        try:
+            doc = nlp(text)
+            sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+        except Exception:
+            sentences = _split_sentences_regex(text)
+    else:
+        sentences = _split_sentences_regex(text)
+
+    if not sentences:
         return [text] if text.strip() else []
 
+    # If entire text fits in one chunk, return as-is
+    if _tok(text) <= chunk_size:
+        return [text]
+
+    # Accumulate sentences into chunks
     chunks = []
-    start = 0
-    while start < len(words):
-        end = start + words_per_chunk
-        chunk = " ".join(words[start:end])
-        if chunk.strip():
-            chunks.append(chunk)
-        start = end - words_overlap
-        if start >= len(words):
-            break
+    current_chunk: list[str] = []
+    current_tokens = 0
+
+    for sentence in sentences:
+        sentence_tokens = _tok(sentence)
+        # If a single sentence is larger than chunk_size, split it by words
+        if sentence_tokens > chunk_size:
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+                current_tokens = 0
+            words = sentence.split()
+            word_start = 0
+            while word_start < len(words):
+                word_end = word_start
+                word_tokens = 0
+                while word_end < len(words):
+                    wt = _tok(words[word_end])
+                    if word_tokens + wt >= chunk_size and word_end > word_start:
+                        break
+                    word_tokens += wt
+                    word_end += 1
+                sub = " ".join(words[word_start:word_end])
+                if sub.strip():
+                    chunks.append(sub)
+                # Overlap in words
+                overlap_words = max(0, word_end - max(1, int(overlap / max(1, _tok(words[0])))))
+                word_start = max(word_start + 1, overlap_words)
+            continue
+        if current_tokens + sentence_tokens >= chunk_size and current_chunk:
+            chunks.append(" ".join(current_chunk))
+            # Overlap: keep trailing sentences that fit within overlap budget
+            overlap_tokens = 0
+            overlap_start = len(current_chunk)
+            for i in range(len(current_chunk) - 1, -1, -1):
+                overlap_tokens += _tok(current_chunk[i])
+                if overlap_tokens >= overlap:
+                    overlap_start = i
+                    break
+            current_chunk = current_chunk[overlap_start:]
+            current_tokens = sum(_tok(s) for s in current_chunk)
+        current_chunk.append(sentence)
+        current_tokens += sentence_tokens
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
 
     return chunks if chunks else ([text] if text.strip() else [])
 
@@ -171,7 +274,8 @@ def build_index(memory_path: Path, config: Config) -> dict:
         rel_path = str(md_file.relative_to(memory_path))
         entity_id = md_file.stem
 
-        chunks = chunk_text(text, config.embeddings.chunk_size, config.embeddings.chunk_overlap)
+        chunks = chunk_text(text, config.embeddings.chunk_size, config.embeddings.chunk_overlap,
+                            language=config.user_language)
 
         start_idx = len(all_chunks)
         for i, chunk in enumerate(chunks):
