@@ -16,7 +16,6 @@ from src.pipeline.orchestrator import (
     consolidate_facts,
     fallback_to_doc_ingest,
     is_timeout_error,
-    make_faiss_fn,
     run_pipeline,
 )
 
@@ -437,7 +436,7 @@ def replay(ctx, list_only):
             console.print(f"  Extracted {len(extraction.entities)} entities")
 
             graph = load_graph(config.memory_path)
-            resolved = resolve_all(extraction, graph, faiss_search_fn=make_faiss_fn(config, config.memory_path))
+            resolved = resolve_all(extraction, graph, config=config, memory_path=config.memory_path)
 
             report = enrich_memory(resolved, config)
             mark_chat_processed(chat_path, report.entities_updated, report.entities_created)

@@ -31,24 +31,6 @@ def is_timeout_error(exc: Exception) -> bool:
     return any(t.lower() in exc_str or t.lower() in exc_type for t in timeout_indicators)
 
 
-def make_faiss_fn(config, memory_path):
-    """Create a FAISS search wrapper compatible with resolver's faiss_search_fn signature.
-
-    The resolver expects: fn(query: str, top_k: int, threshold: float) -> list[dict]
-    The indexer.search expects: search(query, config, memory_path, top_k) -> list[SearchResult]
-    """
-    from src.pipeline.indexer import search as _search
-
-    def fn(query: str, top_k: int = 3, threshold: float = 0.85):
-        results = _search(query, config, memory_path, top_k=top_k)
-        return [
-            {"entity_id": r.entity_id, "score": r.score}
-            for r in results
-            if r.score >= threshold
-        ]
-
-    return fn
-
 
 def fallback_to_doc_ingest(
     chat_path, content: str, reason: str, memory_path, config, console,
@@ -100,7 +82,7 @@ def discover_batch_relations(
     if not touched_ids:
         return 0
 
-    from src.pipeline.indexer import search as faiss_search
+    from src.memory.rag import search as rag_search, SearchOptions
     from src.memory.graph import add_relation, save_graph
     from src.core.models import GraphRelation
 
@@ -119,7 +101,9 @@ def discover_batch_relations(
         if not entity:
             continue
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=3)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=3, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
         for result in results:
@@ -313,7 +297,7 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
 
         # Step 2: Resolve
         graph = load_graph(memory_path)
-        resolved = resolve_all(extraction, graph, faiss_search_fn=make_faiss_fn(config, memory_path))
+        resolved = resolve_all(extraction, graph, config=config, memory_path=memory_path)
 
         # Step 3: Arbitrate ambiguous
         for item in resolved.resolved:
@@ -422,7 +406,7 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
     Pass 1: FAISS + tag overlap per entity
     Pass 2: Co-occurrence from processed chats
     """
-    from src.pipeline.indexer import search as faiss_search
+    from src.memory.rag import search as rag_search, SearchOptions
     from src.memory.graph import load_graph, add_relation, save_graph
     from src.memory.scoring import recalculate_all_scores
     from src.core.models import GraphRelation
@@ -444,7 +428,9 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
         if not entity:
             continue
         try:
-            results = faiss_search(entity.title, config, memory_path, top_k=5)
+            results = rag_search(entity.title, config, memory_path, SearchOptions(
+                top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
+            ))
         except Exception:
             continue
         for result in results:
