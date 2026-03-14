@@ -21,11 +21,13 @@ without explicitly repeating it unless relevant.
 
 {available_entities}
 
-## Extended memory access
+## Memory tools available
 
-If you need more details about any entity listed above
-or any topic the user mentions, use the `search_rag` tool
-with a relevant query. This gives you access to the full
-indexed memory.
+- **search_rag(query)**: Search for specific information not in this context. Use specific terms.
+- **save_chat(messages)**: Save this conversation for future memory processing.
+- **delete_fact(entity_name, fact_content)**: Remove incorrect information.
+- **modify_fact(entity_name, old_content, new_content)**: Correct a fact.
+- **correct_entity(entity_name, field, new_value)**: Update entity metadata (title, type, aliases, retention).
+- **delete_relation(from_entity, to_entity, relation_type)**: Remove a relation.
 
 {custom_instructions}

@@ -259,6 +259,15 @@ def _update_existing_entity(
         new_importance = sum(o.importance for o in raw_entity.observations) / len(raw_entity.observations)
         entity_meta.importance = (entity_meta.importance + new_importance) / 2
 
+    # Recompute negative_valence_ratio from updated MD
+    from src.core.utils import parse_frontmatter
+    from src.memory.graph import compute_negative_valence_ratio
+    try:
+        _, body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
+        entity_meta.negative_valence_ratio = compute_negative_valence_ratio(body)
+    except Exception:
+        pass
+
     report.entities_updated.append(entity_id)
 
 

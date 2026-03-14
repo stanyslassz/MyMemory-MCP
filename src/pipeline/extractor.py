@@ -191,14 +191,41 @@ def _split_text(text: str, segment_tokens: int, overlap_tokens: int) -> list[str
     return segments
 
 
-def extract_from_chat(chat_content: str, config: Config) -> RawExtraction:
+def _build_extraction_context(chat_content: str, config: Config, memory_path: "Path") -> str:
+    """Pre-fetch existing entities related to chat for LLM context."""
+    try:
+        from src.memory.rag import search as rag_search, SearchOptions
+        query = chat_content[:300]
+        results = rag_search(query, config, memory_path, SearchOptions(
+            top_k=5, bump_mentions=False,
+            expand_relations=False, use_fts5=False,
+        ))
+    except Exception:
+        return ""
+    if not results:
+        return ""
+    lines = ["Known entities possibly related to this conversation:"]
+    for r in results:
+        lines.append(f"- {r.entity_id} (score: {r.score:.2f})")
+    return "\n".join(lines)
+
+
+def extract_from_chat(chat_content: str, config: Config, memory_path: "Path | None" = None) -> RawExtraction:
     """Extract structured information from a chat conversation.
 
     If content exceeds 70% of the model's context_window, splits into
     overlapping segments and merges the results.
+
+    When memory_path is provided, pre-fetches existing entities via RAG
+    to inject as context for better importance calibration and name matching.
     """
     if not chat_content.strip():
         return RawExtraction(entities=[], relations=[], summary="")
+
+    # Build existing context if memory_path available
+    existing_context = ""
+    if memory_path is not None:
+        existing_context = _build_extraction_context(chat_content, config, memory_path)
 
     content_tokens = _estimate_tokens(chat_content)
     prompt_overhead = 1500
@@ -206,7 +233,7 @@ def extract_from_chat(chat_content: str, config: Config) -> RawExtraction:
     threshold = int(context_window * 0.7)
 
     if content_tokens + prompt_overhead < threshold:
-        return call_extraction(chat_content, config)
+        return call_extraction(chat_content, config, existing_context=existing_context)
 
     # Split and extract per segment
     segment_tokens = int(context_window * 0.5)
@@ -220,7 +247,7 @@ def extract_from_chat(chat_content: str, config: Config) -> RawExtraction:
     extractions = []
     for i, segment in enumerate(segments):
         logger.info("Extracting segment %d/%d (%d tokens)", i + 1, len(segments), _estimate_tokens(segment))
-        ext = call_extraction(segment, config)
+        ext = call_extraction(segment, config, existing_context=existing_context)
         extractions.append(ext)
 
     return _merge_extractions(extractions)

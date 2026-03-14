@@ -357,7 +357,7 @@ def test_ltd_decays_stale_relations():
 
 
 def test_ltd_preserves_fresh_relations():
-    """Relations reinforced recently (<90 days) should not decay."""
+    """Relations reinforced recently (<90 days) decay only slightly with progressive LTD."""
     config = _make_config()
     today = date(2026, 3, 5)
     graph = GraphData()
@@ -371,10 +371,12 @@ def test_ltd_preserves_fresh_relations():
     )
     graph.relations = [
         GraphRelation(from_entity="a", to_entity="b", type="affects",
-                      strength=0.8, last_reinforced="2026-02-15"),  # <90 days
+                      strength=0.8, last_reinforced="2026-02-15"),  # 18 days ago
     ]
     _apply_ltd(graph, config, today)
-    assert graph.relations[0].strength == 0.8  # unchanged
+    # Progressive LTD: onset_factor = 18/90 = 0.2, so decay is very mild
+    assert graph.relations[0].strength > 0.75  # barely decayed
+    assert graph.relations[0].strength < 0.8   # but not zero decay
 
 
 def test_ltd_minimum_floor():
@@ -567,6 +569,34 @@ def test_upgrade_retention_health():
     )
     _upgrade_retention(graph, today)
     assert graph.entities["sciatique"].retention == "long_term"
+
+
+# ── GAP 6: Activation noise ────────────────────────────────
+
+
+def test_activation_noise_zero_deterministic():
+    """With noise=0, two calls should produce identical scores."""
+    config = _make_config(activation_noise=0.0)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Stable",
+        importance=0.5, mention_dates=["2026-03-01", "2026-03-03"],
+    )
+    s1 = calculate_score(entity, config, today)
+    s2 = calculate_score(entity, config, today)
+    assert s1 == s2
+
+
+def test_activation_noise_nonzero_stochastic():
+    """With noise>0, repeated calls should produce different scores at least once."""
+    config = _make_config(activation_noise=0.25)
+    today = date(2026, 3, 5)
+    entity = GraphEntity(
+        file="self/a.md", type="health", title="Noisy",
+        importance=0.5, mention_dates=["2026-03-01", "2026-03-03"],
+    )
+    scores = {calculate_score(entity, config, today) for _ in range(20)}
+    assert len(scores) > 1, "Expected different scores with noise>0"
 
 
 def test_upgrade_retention_frequent_old_entity():

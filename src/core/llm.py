@@ -246,7 +246,7 @@ def _call_with_stall_detection(
         return result
 
 
-def call_extraction(chat_content: str, config: Config) -> RawExtraction:
+def call_extraction(chat_content: str, config: Config, existing_context: str = "") -> RawExtraction:
     """Step 1: Extract facts and entities from a chat conversation.
 
     Uses stall-aware streaming: active token production resets the watchdog,
@@ -261,6 +261,7 @@ def call_extraction(chat_content: str, config: Config) -> RawExtraction:
         chat_content=chat_content,
         json_schema=schema,
         today=_date.today().isoformat(),
+        existing_context=existing_context,
     )
     stall_timeout = config.llm_extraction.timeout  # reuse timeout as stall threshold
     return _call_with_stall_detection(

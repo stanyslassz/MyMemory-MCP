@@ -56,6 +56,15 @@ IMPORTANT: Only set `supersedes` when the user EXPLICITLY corrects a previous st
 - Each observation content should be concise: max ~120 characters.
 - Respond ONLY with valid JSON. No text before or after.
 
+{existing_context}
+
+If known entities are listed above, calibrate importance:
+- New information about a tracked entity = importance 0.7-0.9
+- Progression or resolution of a known issue = importance 0.8-1.0
+- New entity unrelated to anything known = importance 0.4-0.6
+- Casual mention of a known entity = importance 0.2-0.4
+- If an entity above matches what you're extracting, use the SAME name exactly
+
 # USER
 
 ## Conversation to analyze

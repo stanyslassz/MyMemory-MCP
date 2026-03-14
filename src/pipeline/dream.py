@@ -156,28 +156,55 @@ def run_dream(
 
                 elif s == 3:
                     before = {"total_facts": _count_live_facts(entity_paths)}
+                    snapshot = graph.model_copy(deep=True) if not dry_run else None
                     _step_consolidate_facts(graph, entity_paths, config, console, report, dry_run)
                     summary = f"{report.facts_consolidated} consolidated"
                     if report.facts_consolidated > 0 and not dry_run:
                         after = {"total_facts": _count_live_facts(entity_paths)}
+                        approved, issues = validate_dream_step(s, before, after)
+                        if not approved:
+                            graph = snapshot
+                            from src.memory.graph import save_graph
+                            save_graph(memory_path, graph)
+                            logger.warning("Dream step %d rolled back: %s", s, issues)
+                            dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
                 elif s == 4:
                     before = {"total_entities": len(graph.entities)}
+                    snapshot = graph.model_copy(deep=True) if not dry_run else None
                     _step_merge_entities(graph, memory_path, config, console, report, dry_run, entity_paths)
                     summary = f"{report.entities_merged} merged"
                     if report.entities_merged > 0 and not dry_run:
                         after = {"total_entities": len(graph.entities)}
+                        approved, issues = validate_dream_step(s, before, after)
+                        if not approved:
+                            graph = snapshot
+                            from src.memory.graph import save_graph
+                            save_graph(memory_path, graph)
+                            logger.warning("Dream step %d rolled back: %s", s, issues)
+                            dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
                 elif s == 5:
                     before = {"total_relations": len(graph.relations)}
+                    snapshot = graph.model_copy(deep=True) if not dry_run else None
                     _step_discover_relations(graph, memory_path, config, console, report, dry_run)
                     summary = f"{report.relations_discovered} discovered"
                     if report.relations_discovered > 0 and not dry_run:
                         after = {"total_relations": len(graph.relations)}
+                        approved, issues = validate_dream_step(s, before, after)
+                        if not approved:
+                            graph = snapshot
+                            from src.memory.graph import save_graph
+                            save_graph(memory_path, graph)
+                            logger.warning("Dream step %d rolled back: %s", s, issues)
+                            dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
 
@@ -186,6 +213,10 @@ def run_dream(
                     dashboard.complete_step(s, f"{report.transitive_relations} inferred")
 
                 elif s == 7:
+                    # Rescore before pruning to avoid using stale scores
+                    if not dry_run:
+                        from src.memory.scoring import recalculate_all_scores as _rescore
+                        graph = _rescore(graph, config)
                     _step_prune_dead(graph, memory_path, config, console, report, dry_run)
                     dashboard.complete_step(s, f"{report.entities_pruned} pruned")
 
@@ -462,7 +493,7 @@ def _step_extract_documents(
 
         console.print(f"  [cyan]Extracting from: {source_id}[/cyan]")
         try:
-            extraction = extract_from_chat(text, config)
+            extraction = extract_from_chat(text, config, memory_path)
             extraction = sanitize_extraction(extraction)
 
             if extraction.entities:
@@ -1095,9 +1126,20 @@ def _step_generate_summaries(
                 report.summaries_generated += 1
                 continue
 
-            summary = call_entity_summary(
-                entity.title, entity.type, live_facts, relations, entity.tags, config,
-            )
+            try:
+                summary = call_entity_summary(
+                    entity.title, entity.type, live_facts, relations, entity.tags, config,
+                )
+            except Exception as llm_err:
+                # Fallback: extractive summary when LLM is unavailable
+                logger.warning("LLM summary failed for %s, using extractive fallback: %s", eid, llm_err)
+                from src.pipeline.nlp import extractive_summary
+                top_facts = extractive_summary(live_facts, n_sentences=3)
+                summary = "; ".join(
+                    f.split("] ", 1)[-1].strip() if "] " in f else f.strip("- ")
+                    for f in top_facts
+                )
+
             if summary:
                 fm.summary = summary
                 entity.summary = summary

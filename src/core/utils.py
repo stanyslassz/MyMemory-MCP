@@ -17,9 +17,17 @@ def slugify(text: str) -> str:
     return text
 
 
-def estimate_tokens(text: str) -> int:
-    """Rough token estimate: words * 1.3."""
-    return int(len(text.split()) * 1.3)
+_ROMANCE_LANGUAGES = frozenset({"fr", "de", "es", "it", "pt"})
+
+
+def estimate_tokens(text: str, language: str = "en") -> int:
+    """Rough token estimate: words * ratio.
+
+    Romance languages (fr, de, es, it, pt) use ratio 1.5 due to longer
+    subword tokenization. Others default to 1.3.
+    """
+    ratio = 1.5 if language in _ROMANCE_LANGUAGES else 1.3
+    return int(len(text.split()) * ratio)
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:

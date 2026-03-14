@@ -98,9 +98,10 @@ def build_natural_context(
             return _build_section_llm(section_label or budget_key, entities, graph, memory_path, config, sb)
         lines = []
         used = 0
+        lang = config.user_language
         for eid, entity in entities:
             bullet = _build_natural_bullet(eid, entity, graph, memory_path)
-            cost = _estimate_tokens(bullet)
+            cost = _estimate_tokens(bullet, language=lang)
             if used + cost > sb and lines:
                 break
             lines.append(bullet)

@@ -38,7 +38,9 @@ llm:
 # ── Embeddings ─────────────────────────────────────────────────
 embeddings:
   provider: sentence-transformers   # Local, no API needed
-  model: all-MiniLM-L6-v2
+  # Multilingual model — same 384 dimensions as all-MiniLM-L6-v2, FAISS compatible.
+  # Handles French, English, German, Spanish, Italian, Portuguese, etc.
+  model: paraphrase-multilingual-MiniLM-L12-v2
   chunk_size: 400
   chunk_overlap: 80
   # provider: openai               # For API-based embeddings

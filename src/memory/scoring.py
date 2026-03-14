@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from datetime import date, datetime
 from collections import defaultdict
 
@@ -94,6 +95,10 @@ def calculate_score(
 
     # Combined activation
     activation = B + beta + s.spreading_weight * spreading_bonus + emotional_boost
+
+    # Optional ACT-R activation noise (logistic perturbation)
+    if s.activation_noise > 0:
+        activation += random.gauss(0, s.activation_noise)
 
     score = _sigmoid(activation)
 
@@ -202,9 +207,12 @@ def _apply_ltd(graph: GraphData, config: Config, today: date) -> None:
             days = (today - d).days
         except (ValueError, TypeError):
             continue
-        if days > s.ltd_onset_days:
-            decay = math.exp(-days / s.relation_ltd_halflife)
-            rel.strength = round(max(s.min_relation_strength, rel.strength * decay), 4)
+        if days > 0:
+            # Progressive onset: linear fade-in from 0→1 over ltd_onset_days
+            onset_factor = min(1.0, days / s.ltd_onset_days)
+            decay = math.exp(-onset_factor * days / s.relation_ltd_halflife)
+            new_strength = round(max(s.min_relation_strength, rel.strength * decay), 4)
+            rel.strength = new_strength
 
 
 def _upgrade_retention(graph: GraphData, today: date) -> None:

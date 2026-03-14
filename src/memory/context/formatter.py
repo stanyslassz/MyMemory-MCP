@@ -399,7 +399,8 @@ def _collect_section(
     used = 0
     for eid, entity in entities:
         dossier = _enrich_entity(eid, entity, graph, memory_path, config)
-        cost = _estimate_tokens(dossier)
+        lang = config.user_language if config else "en"
+        cost = _estimate_tokens(dossier, language=lang)
         if used + cost > token_budget and parts:
             break
         parts.append(dossier)

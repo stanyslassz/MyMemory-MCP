@@ -434,7 +434,7 @@ def replay(ctx, list_only):
         content = get_chat_content(chat_path)
 
         try:
-            extraction = extract_from_chat(content, config)
+            extraction = extract_from_chat(content, config, config.memory_path)
             extraction = sanitize_extraction(extraction)
             console.print(f"  Extracted {len(extraction.entities)} entities")
 
@@ -595,10 +595,34 @@ def relations(ctx, entity, dry_run):
 def graph(ctx):
     """Open interactive dashboard with graph, timeline, dream replay and search."""
     config = ctx.obj["config"]
-    from src.pipeline.dashboard import open_dashboard
+    from src.pipeline.dashboard_server import start_server
 
-    output = open_dashboard(config)
-    console.print(f"[green]✓ Dashboard generated: {output}[/green]")
+    start_server(config)
+
+
+@cli.command()
+@click.argument("query")
+@click.option("--top-k", "-k", default=5, help="Number of results")
+@click.option("--expand/--no-expand", default=True, help="Expand relations")
+@click.pass_context
+def search(ctx, query, top_k, expand):
+    """Search memory via RAG."""
+    config = ctx.obj["config"]
+    memory_path = config.memory_path
+    from src.memory.rag import search as rag_search, SearchOptions
+    results = rag_search(query, config, memory_path, SearchOptions(
+        top_k=top_k, expand_relations=expand, include_chunk_text=True,
+    ))
+    if not results:
+        console.print("[dim]No results found.[/dim]")
+        return
+    table = Table(title=f"Results for '{query}'")
+    table.add_column("Entity", style="cyan")
+    table.add_column("Score", justify="right")
+    table.add_column("Chunk", max_width=60)
+    for r in results:
+        table.add_row(r.entity_id, f"{r.score:.3f}", (r.chunk or "")[:60])
+    console.print(table)
 
 
 @cli.command()

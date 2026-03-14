@@ -26,6 +26,7 @@ dev = [
 ]
 nlp = [
     "spacy>=3.5",
+    "rapidfuzz>=3.0",
 ]
 
 [project.scripts]

@@ -169,6 +169,6 @@ def _sort_by_cluster(
     return sorted(entities, key=lambda x: (cluster_first_idx.get(cluster_map.get(x[0], 0), 0), original_pos.get(x[0], 0)))
 
 
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: words * 1.3. Delegates to shared util."""
-    return _estimate_tokens_util(text)
+def _estimate_tokens(text: str, language: str = "en") -> int:
+    """Rough token estimate. Delegates to shared util."""
+    return _estimate_tokens_util(text, language=language)

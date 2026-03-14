@@ -219,20 +219,13 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
 
 
 def _dedup_facts_deterministic(facts: list[str], threshold: float = 0.85) -> list[str]:
-    """Remove near-duplicate facts using sequence similarity."""
-    from difflib import SequenceMatcher
+    """Remove near-duplicate facts using sequence similarity.
 
-    kept = []
-    for fact in facts:
-        is_dup = False
-        for existing in kept:
-            ratio = SequenceMatcher(None, fact.lower(), existing.lower()).ratio()
-            if ratio >= threshold:
-                is_dup = True
-                break
-        if not is_dup:
-            kept.append(fact)
-    return kept
+    Delegates to nlp.dedup_facts_deterministic (rapidfuzz with difflib fallback).
+    Threshold is 0..1 here (legacy interface) but nlp uses 0..100, so we convert.
+    """
+    from src.pipeline.nlp import dedup_facts_deterministic
+    return dedup_facts_deterministic(facts, threshold=threshold * 100.0)
 
 
 def consolidate_entity_facts(

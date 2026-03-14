@@ -59,6 +59,11 @@ def generate_dashboard(config: Config) -> Path:
         .replace("/*__STATS__*/", json.dumps(stats, ensure_ascii=False))
         .replace("/*__TYPE_COLORS__*/", json.dumps(TYPE_COLORS))
         .replace("/*__SOLVER__*/", solver_config)
+        .replace("/*__RELATION_TYPES__*/", json.dumps([
+            "affects", "improves", "worsens", "requires", "linked_to",
+            "lives_with", "works_at", "parent_of", "friend_of", "uses",
+            "part_of", "contrasts_with", "precedes",
+        ]))
     )
 
     output = memory_path / "_dashboard.html"
@@ -116,6 +121,7 @@ def _load_entity_details(graph: GraphData, memory_path: Path) -> dict:
                 "tags": list(entity.tags or []),
                 "aliases": list(entity.aliases or []),
                 "summary": entity.summary or "",
+                "file": entity.file,
             }
         except Exception:
             continue
@@ -248,7 +254,9 @@ nav .stat-val { color: var(--accent); font-weight: 600; font-size: 14px; }
 #graph-panel {
     width: 260px; padding: 16px; background: var(--bg-secondary);
     border-left: 1px solid var(--border); overflow-y: auto;
+    transition: width 0.2s ease;
 }
+#graph-panel.search-active { width: 340px; }
 #graph-panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin: 16px 0 8px 0; }
 #graph-panel h3:first-child { margin-top: 0; }
 #graph-panel label { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; cursor: pointer; color: var(--text-primary); }
@@ -314,6 +322,12 @@ nav .stat-val { color: var(--accent); font-weight: 600; font-size: 14px; }
     font-size: 9px; font-weight: 600; text-transform: uppercase;
 }
 .search-count { font-size: 10px; color: var(--text-secondary); margin-bottom: 6px; }
+mark { background: var(--accent); color: #000; border-radius: 2px; padding: 0 1px; }
+.node-counter { font-size: 10px; color: var(--text-secondary); margin-top: 6px; }
+.relation-link { cursor: pointer; transition: color 0.1s; }
+.relation-link:hover { color: var(--accent); text-decoration: underline; }
+.dream-step.clickable { cursor: pointer; transition: background 0.1s; border-radius: 6px; padding: 8px 4px; }
+.dream-step.clickable:hover { background: var(--bg-card-hover); }
 
 /* Detail panel (slide-in sidebar) */
 #detail-panel {
@@ -349,6 +363,61 @@ nav .stat-val { color: var(--accent); font-weight: 600; font-size: 14px; }
 #timeline-filters { width: 220px; padding: 16px; background: var(--bg-secondary); border-left: 1px solid var(--border); overflow-y: auto; }
 #timeline-filters h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 10px; }
 #timeline-filters label { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; cursor: pointer; }
+
+/* Raw MD */
+#raw-md-container {
+    margin-top: 10px; max-height: 300px; overflow-y: auto;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+    font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all;
+    color: var(--text-secondary); line-height: 1.5; display: none;
+}
+#raw-md-container.open { display: block; }
+
+/* Action buttons */
+.panel-btn {
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-card); color: var(--text-primary); cursor: pointer;
+    font-size: 11px; font-weight: 500; transition: all 0.15s; margin-right: 6px;
+}
+.panel-btn:hover { background: var(--bg-card-hover); border-color: var(--accent); }
+.panel-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.panel-actions { display: flex; gap: 6px; margin: 12px 0; }
+
+/* Add relation form */
+#add-relation-form {
+    display: none; margin-top: 10px; padding: 10px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+#add-relation-form.open { display: block; }
+#add-relation-form select, #add-relation-form input {
+    width: 100%; padding: 6px 8px; margin: 4px 0; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+    font-size: 12px; outline: none;
+}
+#add-relation-form select:focus, #add-relation-form input:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 2px var(--glow);
+}
+#add-relation-form button {
+    margin-top: 6px; padding: 5px 16px; border-radius: 4px; border: none;
+    background: var(--accent); color: #000; font-weight: 600; font-size: 12px;
+    cursor: pointer; transition: opacity 0.15s;
+}
+#add-relation-form button:hover { opacity: 0.85; }
+.autocomplete-list {
+    position: absolute; z-index: 100; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; max-height: 150px; overflow-y: auto; width: calc(100% - 20px);
+}
+.autocomplete-item {
+    padding: 4px 8px; cursor: pointer; font-size: 11px; color: var(--text-primary);
+}
+.autocomplete-item:hover { background: var(--bg-card-hover); }
+
+/* Delete relation button */
+.rel-delete {
+    display: inline-block; margin-left: 6px; color: var(--danger); cursor: pointer;
+    font-size: 12px; opacity: 0.5; transition: opacity 0.15s;
+}
+.rel-delete:hover { opacity: 1; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
@@ -401,6 +470,20 @@ nav .stat-val { color: var(--accent); font-weight: 600; font-size: 14px; }
 </aside>
 
 <script>
+// ===== KEYBOARD SHORTCUTS =====
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closePanel(); }
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        var searchInput = document.getElementById('graph-search');
+        if (searchInput) { searchInput.focus(); }
+    }
+});
+document.addEventListener('click', function(e) {
+    var dd = document.getElementById('autocomplete-dropdown');
+    if (dd && !e.target.closest('#add-relation-form')) dd.style.display = 'none';
+});
+
 // ===== DATA =====
 var allNodes = /*__NODES__*/;
 var allEdges = /*__EDGES__*/;
@@ -409,6 +492,7 @@ var ENTITIES = /*__ENTITIES__*/;
 var DREAM_SESSIONS = /*__DREAM_SESSIONS__*/;
 var STATS = /*__STATS__*/;
 var TYPE_COLORS = /*__TYPE_COLORS__*/;
+var RELATION_TYPES = /*__RELATION_TYPES__*/;
 var DEFAULT_COLOR = "#90A4AE";
 
 var EVENT_ICONS = {
@@ -423,6 +507,14 @@ var EVENT_ICONS = {
 function escapeHtml(s) {
     if (!s) return '';
     var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+function highlightMatch(text, query) {
+    if (!query || !text) return escapeHtml(text);
+    var escaped = escapeHtml(text);
+    var qEscaped = escapeHtml(query);
+    var re = new RegExp('(' + qEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    return escaped.replace(re, '<mark>$1</mark>');
 }
 
 // ===== NAV STATS =====
@@ -511,8 +603,10 @@ function filterGraph() {
     for (var i = 0; i < checks.length; i++) active[checks[i].dataset.type] = true;
 
     var nodeUpdates = [];
+    var visibleCount = 0;
     allNodes.forEach(function(n) {
         var visible = n.data.score >= minScore && active[n.data.type] && (!l1Only || n.data.score >= 0.3);
+        if (visible) visibleCount++;
         nodeUpdates.push({ id: n.id, hidden: !visible });
     });
     nodes.update(nodeUpdates);
@@ -523,11 +617,23 @@ function filterGraph() {
         edgeUpdates.push({ id: e.id, hidden: (fn && fn.hidden) || (tn && tn.hidden) });
     });
     edges.update(edgeUpdates);
+
+    // Update node counter
+    var counterEl = document.getElementById('node-counter');
+    if (!counterEl) {
+        counterEl = document.createElement('div');
+        counterEl.id = 'node-counter';
+        counterEl.className = 'node-counter';
+        document.getElementById('score-slider').parentNode.insertBefore(counterEl, document.getElementById('score-slider').nextSibling);
+    }
+    counterEl.textContent = visibleCount + '/' + allNodes.length + ' visible';
 }
 
 function searchGraph() {
     var q = document.getElementById('graph-search').value.toLowerCase().trim();
     var resultsEl = document.getElementById('search-results');
+
+    var panel = document.getElementById('graph-panel');
 
     // Reset graph opacity
     if (!q) {
@@ -535,6 +641,7 @@ function searchGraph() {
             return { id: n.id, opacity: 1.0, font: { size: 14, color: '#eee' } };
         }));
         resultsEl.innerHTML = '';
+        panel.classList.remove('search-active');
         return;
     }
 
@@ -572,7 +679,8 @@ function searchGraph() {
         network.focus(results[0].eid, { scale: 1.2, animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
     }
 
-    // Render results list in panel
+    // Render results list in panel with highlight
+    panel.classList.add('search-active');
     var html = '<div class="search-count">' + results.length + ' result' + (results.length !== 1 ? 's' : '') + '</div>';
     html += results.slice(0, 15).map(function(r) {
         var e = r.e;
@@ -583,17 +691,20 @@ function searchGraph() {
         return '<div class="search-hit" onclick="focusAndShow(\'' + r.eid.replace(/'/g, "\\'") + '\')">' +
             '<div><span class="hit-score">' + e.score.toFixed(2) + '</span>' +
             '<span class="hit-type" style="background:' + (TYPE_COLORS[e.type] || DEFAULT_COLOR) + '22;color:' + (TYPE_COLORS[e.type] || DEFAULT_COLOR) + '">' + e.type + '</span> ' +
-            '<span class="hit-title">' + escapeHtml(e.title) + '</span></div>' +
-            (matchingFact ? '<div class="hit-meta">' + escapeHtml(matchingFact.substring(0, 80)) + '</div>' : '') +
+            '<span class="hit-title">' + highlightMatch(e.title, q) + '</span></div>' +
+            (matchingFact ? '<div class="hit-meta">' + highlightMatch(matchingFact.substring(0, 80), q) + '</div>' : '') +
             '</div>';
     }).join('');
     resultsEl.innerHTML = html;
 }
 
 // ===== DETAIL PANEL =====
+var _currentEntityId = null;
+
 function showEntityDetail(eid) {
     var e = ENTITIES[eid];
     if (!e) return;
+    _currentEntityId = eid;
     var relFrom = allEdges.filter(function(r) { return r.from === eid; });
     var relTo = allEdges.filter(function(r) { return r.to === eid; });
 
@@ -610,6 +721,26 @@ function showEntityDetail(eid) {
         e.tags.forEach(function(t) { html += '<span class="tag">' + escapeHtml(t) + '</span>'; });
         html += '</div>';
     }
+
+    // Action buttons
+    html += '<div class="panel-actions">';
+    html += '<button class="panel-btn" id="btn-raw-md" onclick="toggleRawMd(\'' + eid.replace(/'/g, "\\'") + '\')">Raw MD</button>';
+    html += '<button class="panel-btn" id="btn-add-rel" onclick="toggleAddRelation()">+ Relation</button>';
+    html += '</div>';
+    html += '<div id="raw-md-container"></div>';
+
+    // Add relation form
+    html += '<div id="add-relation-form">';
+    html += '<div style="position:relative;">';
+    html += '<select id="rel-type-select">';
+    RELATION_TYPES.forEach(function(t) { html += '<option value="' + t + '">' + t + '</option>'; });
+    html += '</select>';
+    html += '<input type="text" id="rel-target-input" placeholder="Target entity..." oninput="autocompleteTarget()" onfocus="autocompleteTarget()" onkeydown="acKeydown(event)">';
+    html += '<div id="autocomplete-dropdown" class="autocomplete-list" style="display:none;"></div>';
+    html += '</div>';
+    html += '<button onclick="submitAddRelation()">Add</button>';
+    html += '</div>';
+
     html += '<div class="section-title">Facts (' + e.facts.length + ')</div>';
     e.facts.forEach(function(f) { html += '<div class="fact">' + escapeHtml(f) + '</div>'; });
     if (relFrom.length) {
@@ -617,7 +748,11 @@ function showEntityDetail(eid) {
         relFrom.forEach(function(r) {
             var target = ENTITIES[r.to];
             var tname = target ? target.title : r.to;
-            html += '<div class="fact">&rarr; ' + (r.data ? r.data.type : r.label) + ' <strong>' + escapeHtml(tname) + '</strong></div>';
+            var targetId = r.to.replace(/'/g, "\\'");
+            var rtype = r.data ? r.data.type : r.label;
+            html += '<div class="fact">&rarr; ' + rtype + ' <strong class="relation-link" onclick="focusAndShow(\'' + targetId + '\')">' + escapeHtml(tname) + '</strong>';
+            html += '<span class="rel-delete" onclick="deleteRelation(\'' + eid.replace(/'/g, "\\'") + '\',\'' + targetId + '\',\'' + rtype + '\')" title="Delete relation">&times;</span>';
+            html += '</div>';
         });
     }
     if (relTo.length) {
@@ -625,7 +760,11 @@ function showEntityDetail(eid) {
         relTo.forEach(function(r) {
             var source = ENTITIES[r.from];
             var sname = source ? source.title : r.from;
-            html += '<div class="fact">&larr; ' + (r.data ? r.data.type : r.label) + ' <strong>' + escapeHtml(sname) + '</strong></div>';
+            var sourceId = r.from.replace(/'/g, "\\'");
+            var rtype = r.data ? r.data.type : r.label;
+            html += '<div class="fact">&larr; ' + rtype + ' <strong class="relation-link" onclick="focusAndShow(\'' + sourceId + '\')">' + escapeHtml(sname) + '</strong>';
+            html += '<span class="rel-delete" onclick="deleteRelation(\'' + sourceId + '\',\'' + eid.replace(/'/g, "\\'") + '\',\'' + rtype + '\')" title="Delete relation">&times;</span>';
+            html += '</div>';
         });
     }
     html += '<div class="section-title">Recent mentions</div>';
@@ -633,6 +772,143 @@ function showEntityDetail(eid) {
 
     document.getElementById('panel-content').innerHTML = html;
     document.getElementById('detail-panel').classList.add('open');
+}
+
+// ===== RAW MD =====
+function toggleRawMd(eid) {
+    var container = document.getElementById('raw-md-container');
+    var btn = document.getElementById('btn-raw-md');
+    if (container.classList.contains('open')) {
+        container.classList.remove('open');
+        btn.classList.remove('active');
+        return;
+    }
+    container.textContent = 'Loading...';
+    container.classList.add('open');
+    btn.classList.add('active');
+    fetch('/api/entity/' + encodeURIComponent(eid) + '/raw')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { container.textContent = 'Error: ' + data.error; return; }
+            container.textContent = data.content;
+        })
+        .catch(function(err) { container.textContent = 'Fetch error: ' + err; });
+}
+
+// ===== ADD RELATION =====
+function toggleAddRelation() {
+    var form = document.getElementById('add-relation-form');
+    var btn = document.getElementById('btn-add-rel');
+    if (form.classList.contains('open')) {
+        form.classList.remove('open');
+        btn.classList.remove('active');
+    } else {
+        form.classList.add('open');
+        btn.classList.add('active');
+    }
+}
+
+var _acSelected = -1;
+function autocompleteTarget() {
+    var input = document.getElementById('rel-target-input');
+    var dropdown = document.getElementById('autocomplete-dropdown');
+    var q = input.value.toLowerCase().trim();
+    _acSelected = -1;
+    if (!q) { dropdown.style.display = 'none'; return; }
+    var matches = [];
+    for (var eid in ENTITIES) {
+        if (eid === _currentEntityId) continue;
+        var e = ENTITIES[eid];
+        if (e.title.toLowerCase().indexOf(q) >= 0 || eid.indexOf(q) >= 0) {
+            matches.push({ eid: eid, title: e.title });
+        }
+    }
+    if (!matches.length) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = matches.slice(0, 10).map(function(m, i) {
+        return '<div class="autocomplete-item" data-idx="' + i + '" data-eid="' + m.eid + '" onmousedown="pickAutocomplete(\'' + m.eid.replace(/'/g, "\\'") + '\',\'' + escapeHtml(m.title).replace(/'/g, "\\'") + '\')">' + escapeHtml(m.title) + ' <span style="color:var(--text-secondary);font-size:9px;">' + m.eid + '</span></div>';
+    }).join('');
+    dropdown.style.display = 'block';
+}
+
+function pickAutocomplete(eid, title) {
+    document.getElementById('rel-target-input').value = title;
+    document.getElementById('rel-target-input').dataset.eid = eid;
+    document.getElementById('autocomplete-dropdown').style.display = 'none';
+}
+
+function acKeydown(e) {
+    var dropdown = document.getElementById('autocomplete-dropdown');
+    var items = dropdown.querySelectorAll('.autocomplete-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _acSelected = Math.min(_acSelected + 1, items.length - 1); highlightAc(items); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _acSelected = Math.max(_acSelected - 1, 0); highlightAc(items); }
+    else if (e.key === 'Enter' && _acSelected >= 0) { e.preventDefault(); items[_acSelected].dispatchEvent(new Event('mousedown')); }
+}
+
+function highlightAc(items) {
+    for (var i = 0; i < items.length; i++) {
+        items[i].style.background = i === _acSelected ? 'var(--bg-card-hover)' : '';
+    }
+}
+
+function submitAddRelation() {
+    var fromId = _currentEntityId;
+    var relType = document.getElementById('rel-type-select').value;
+    var targetInput = document.getElementById('rel-target-input');
+    var toId = targetInput.dataset.eid;
+    if (!toId) {
+        // Try to match by slug
+        var q = targetInput.value.toLowerCase().trim().replace(/\s+/g, '-');
+        if (ENTITIES[q]) toId = q;
+    }
+    if (!fromId || !toId || !relType) { alert('Select a target entity.'); return; }
+
+    fetch('/api/relation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromId, to: toId, type: relType })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert('Error: ' + data.error); return; }
+        // Add edge to vis.js
+        var edgeData = {
+            from: fromId, to: toId, label: relType,
+            title: relType + ' (strength: 0.50)',
+            width: 2, arrows: 'to', color: { opacity: 0.6 },
+            data: { type: relType, strength: 0.5, last_reinforced: '', mention_count: 1 }
+        };
+        edges.add(edgeData);
+        allEdges.push(edgeData);
+        // Refresh detail panel
+        showEntityDetail(fromId);
+    })
+    .catch(function(err) { alert('Fetch error: ' + err); });
+}
+
+// ===== DELETE RELATION =====
+function deleteRelation(fromId, toId, relType) {
+    if (!confirm('Delete relation: ' + fromId + ' \u2192 ' + relType + ' \u2192 ' + toId + '?')) return;
+    fetch('/api/relation', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromId, to: toId, type: relType })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert('Error: ' + data.error); return; }
+        // Remove edge from vis.js
+        var toRemove = edges.get({ filter: function(e) {
+            return e.from === fromId && e.to === toId && ((e.data && e.data.type === relType) || e.label === relType);
+        }});
+        if (toRemove.length) edges.remove(toRemove[0].id);
+        allEdges = allEdges.filter(function(e) {
+            return !(e.from === fromId && e.to === toId && ((e.data && e.data.type === relType) || e.label === relType));
+        });
+        // Refresh detail panel
+        showEntityDetail(_currentEntityId || fromId);
+    })
+    .catch(function(err) { alert('Fetch error: ' + err); });
 }
 
 function focusAndShow(eid) {
@@ -720,14 +996,14 @@ function renderDream() {
         container.innerHTML = '<p style="color:var(--text-secondary);padding:20px;">No dream sessions found in event log.</p>';
         return;
     }
-    container.innerHTML = DREAM_SESSIONS.map(function(session) {
+    container.innerHTML = DREAM_SESSIONS.map(function(session, si) {
         return '<div class="dream-session"><h3>\u{1F319} Dream \u2014 ' + session.date + '</h3>' +
-            session.steps.map(function(step) {
+            session.steps.map(function(step, sti) {
                 var d = step.data || {};
                 var status = step.type === 'dream_step_completed' ? '\u2705' :
                              step.type === 'dream_step_failed' ? '\u274C' :
                              step.type === 'dream_step_started' ? '\u23F3' : '\u23ED';
-                return '<div class="dream-step">' +
+                return '<div class="dream-step clickable" onclick="showDreamStepDetail(' + si + ',' + sti + ')">' +
                     '<span>' + status + '</span>' +
                     '<span>' + (d.step || '') + ' ' + escapeHtml(d.step_name || d.description || '') + '</span>' +
                     '<span class="step-duration">' + (d.duration_s ? d.duration_s.toFixed(1) + 's' : '') + '</span>' +
@@ -736,6 +1012,53 @@ function renderDream() {
     }).join('');
 }
 
+
+// ===== DREAM STEP DETAIL =====
+function showDreamStepDetail(sessionIdx, stepIdx) {
+    var session = DREAM_SESSIONS[sessionIdx];
+    if (!session) return;
+    var step = session.steps[stepIdx];
+    if (!step) return;
+    var d = step.data || {};
+
+    var status = step.type === 'dream_step_completed' ? '\u2705 Completed' :
+                 step.type === 'dream_step_failed' ? '\u274C Failed' :
+                 step.type === 'dream_step_started' ? '\u23F3 Started' : '\u23ED Skipped';
+
+    var html = '<h2>\u{1F319} ' + escapeHtml(d.step_name || d.description || 'Dream Step') + '</h2>';
+    html += '<div class="meta">';
+    html += '<strong>Status:</strong> ' + status + '<br>';
+    html += '<strong>Session:</strong> ' + session.date + '<br>';
+    if (d.step) html += '<strong>Step:</strong> ' + d.step + '<br>';
+    if (d.duration_s) html += '<strong>Duration:</strong> ' + d.duration_s.toFixed(1) + 's<br>';
+    if (step.ts) html += '<strong>Time:</strong> ' + step.ts + '<br>';
+    html += '</div>';
+
+    if (d.summary) {
+        html += '<div class="section-title">Summary</div>';
+        html += '<div class="fact">' + escapeHtml(d.summary) + '</div>';
+    }
+    if (d.error) {
+        html += '<div class="section-title">Error</div>';
+        html += '<div class="fact" style="color:var(--danger)">' + escapeHtml(d.error) + '</div>';
+    }
+
+    // Show all extra data fields
+    var extraKeys = Object.keys(d).filter(function(k) {
+        return ['step', 'step_name', 'description', 'duration_s', 'summary', 'error'].indexOf(k) < 0;
+    });
+    if (extraKeys.length) {
+        html += '<div class="section-title">Details</div>';
+        html += '<pre style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;line-height:1.5;">';
+        var extraData = {};
+        extraKeys.forEach(function(k) { extraData[k] = d[k]; });
+        html += escapeHtml(JSON.stringify(extraData, null, 2));
+        html += '</pre>';
+    }
+
+    document.getElementById('panel-content').innerHTML = html;
+    document.getElementById('detail-panel').classList.add('open');
+}
 
 </script>
 </body>

@@ -235,7 +235,7 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
                 monthly_buckets=fm_data.get("monthly_buckets", {}),
                 created=str(fm_data.get("created", "")),
                 summary=fm_data.get("summary", ""),
-                negative_valence_ratio=_compute_negative_valence_ratio(body),
+                negative_valence_ratio=compute_negative_valence_ratio(body),
             )
             graph.entities[slug] = entity
 
@@ -327,7 +327,7 @@ def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) ->
                     pass  # Invalid relation type, skip
 
 
-def _compute_negative_valence_ratio(body: str) -> float:
+def compute_negative_valence_ratio(body: str) -> float:
     """Compute ratio of negative/vigilance/diagnosis facts in the Facts section.
 
     Scans for [-] valence markers and [vigilance]/[diagnosis] categories.

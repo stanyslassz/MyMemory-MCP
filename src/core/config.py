@@ -58,6 +58,7 @@ class ScoringConfig:
     max_spreading_neighbors: int = 10
     ltd_onset_days: int = 90
     min_relation_strength: float = 0.1
+    activation_noise: float = 0.0
 
 
 @dataclass
@@ -313,6 +314,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             max_spreading_neighbors=scoring.get("max_spreading_neighbors", 10),
             ltd_onset_days=scoring.get("ltd_onset_days", 90),
             min_relation_strength=scoring.get("min_relation_strength", 0.1),
+            activation_noise=scoring.get("activation_noise", 0.0),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),

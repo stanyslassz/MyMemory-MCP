@@ -276,7 +276,7 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
             continue
 
         try:
-            extraction = extract_from_chat(content, config)
+            extraction = extract_from_chat(content, config, memory_path)
             extraction = sanitize_extraction(extraction)
             console.print(f"  Extracted {len(extraction.entities)} entities, {len(extraction.relations)} relations")
         except Exception as e:
@@ -511,6 +511,41 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
             existing.add((a, b))
             existing.add((b, a))
             discovered += 1
+
+    # Pass 3: NER-based relation extraction from recent chats (spaCy)
+    if config.nlp.enabled and config.nlp.pre_ner and not entity_filter:
+        try:
+            from src.pipeline.nlp import extract_relations_nlp
+            from src.core.utils import slugify
+
+            chats_dir = memory_path / "chats"
+            if chats_dir.exists():
+                for chat_file in sorted(chats_dir.glob("*.md"))[-20:]:  # last 20 chats
+                    try:
+                        text = chat_file.read_text(encoding="utf-8")
+                        ner_rels = extract_relations_nlp(text, language=config.user_language)
+                        for nr in ner_rels:
+                            slug_from = slugify(nr["from"])
+                            slug_to = slugify(nr["to"])
+                            if slug_from not in graph.entities or slug_to not in graph.entities:
+                                continue
+                            if (slug_from, slug_to) in existing:
+                                continue
+                            if dry_run:
+                                console.print(f"  [dim]Would link (NER): {nr['from']} <-> {nr['to']} ({nr['type']})[/dim]")
+                            else:
+                                new_rel = GraphRelation(
+                                    from_entity=slug_from, to_entity=slug_to,
+                                    type=nr["type"], context="NER extraction",
+                                )
+                                add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
+                            existing.add((slug_from, slug_to))
+                            existing.add((slug_to, slug_from))
+                            discovered += 1
+                    except Exception:
+                        continue
+        except ImportError:
+            pass
 
     if discovered and not dry_run:
         graph = recalculate_all_scores(graph, config)

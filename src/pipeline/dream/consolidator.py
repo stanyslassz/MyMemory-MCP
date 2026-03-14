@@ -64,7 +64,7 @@ def _step_extract_documents(
 
         console.print(f"  [cyan]Extracting from: {source_id}[/cyan]")
         try:
-            extraction = extract_from_chat(text, config)
+            extraction = extract_from_chat(text, config, memory_path)
             extraction = sanitize_extraction(extraction)
 
             if extraction.entities:
