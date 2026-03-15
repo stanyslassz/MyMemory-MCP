@@ -168,17 +168,33 @@ def _graph_to_vis(graph: GraphData, memory_path: Path) -> dict:
 
 
 def _extract_dream_sessions(events: list[dict]) -> list[dict]:
-    """Group dream_step_* events by day into sessions."""
+    """Group dream events by dream_id into sessions."""
     sessions: dict[str, dict] = {}
     for evt in events:
         evt_type = evt.get("type", "")
-        if not evt_type.startswith("dream_step_"):
+        if not (evt_type.startswith("dream_step_") or evt_type.startswith("dream_session_")):
             continue
-        ts = evt.get("ts", "")
-        day = ts[:10] if len(ts) >= 10 else "unknown"
-        if day not in sessions:
-            sessions[day] = {"date": day, "steps": []}
-        sessions[day]["steps"].append(evt)
+        dream_id = evt.get("data", {}).get("dream_id", "")
+        if not dream_id:
+            ts = evt.get("ts", "")
+            dream_id = ts[:10] if len(ts) >= 10 else "unknown"
+        if dream_id not in sessions:
+            ts = evt.get("ts", "")
+            sessions[dream_id] = {
+                "date": ts[:10] if len(ts) >= 10 else "unknown",
+                "dream_id": dream_id,
+                "steps": [],
+                "duration_s": None,
+                "steps_completed": None,
+                "steps_failed": None,
+            }
+        if evt_type == "dream_session_completed":
+            d = evt.get("data", {})
+            sessions[dream_id]["duration_s"] = d.get("duration_s")
+            sessions[dream_id]["steps_completed"] = d.get("steps_completed")
+            sessions[dream_id]["steps_failed"] = d.get("steps_failed")
+        elif evt_type.startswith("dream_step_"):
+            sessions[dream_id]["steps"].append(evt)
     return sorted(sessions.values(), key=lambda s: s["date"], reverse=True)
 
 
@@ -997,7 +1013,16 @@ function renderDream() {
         return;
     }
     container.innerHTML = DREAM_SESSIONS.map(function(session, si) {
-        return '<div class="dream-session"><h3>\u{1F319} Dream \u2014 ' + session.date + '</h3>' +
+        var header = '\u{1F319} Dream \u2014 ' + session.date;
+        if (session.duration_s != null) {
+            var d = session.duration_s;
+            header += ' \u2014 ' + (d >= 60 ? Math.floor(d/60) + 'm ' + Math.floor(d%60) + 's' : d.toFixed(1) + 's');
+        }
+        if (session.steps_completed != null) {
+            header += ' \u2014 ' + session.steps_completed + ' completed';
+            if (session.steps_failed) header += ', ' + session.steps_failed + ' failed';
+        }
+        return '<div class="dream-session"><h3>' + header + '</h3>' +
             session.steps.map(function(step, sti) {
                 var d = step.data || {};
                 var status = step.type === 'dream_step_completed' ? '\u2705' :
@@ -1043,12 +1068,23 @@ function showDreamStepDetail(sessionIdx, stepIdx) {
         html += '<div class="fact" style="color:var(--danger)">' + escapeHtml(d.error) + '</div>';
     }
 
-    // Show all extra data fields
+    // Show details dict with friendly formatting
+    if (d.details && Object.keys(d.details).length) {
+        html += '<div class="section-title">Details</div>';
+        html += '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;padding:8px 0;">';
+        Object.keys(d.details).forEach(function(k) {
+            html += '<span style="color:var(--text-secondary)">' + escapeHtml(k.replace(/_/g, ' ')) + ':</span>';
+            html += '<span style="color:var(--text-primary);font-weight:500">' + d.details[k] + '</span>';
+        });
+        html += '</div>';
+    }
+
+    // Show remaining extra data fields
     var extraKeys = Object.keys(d).filter(function(k) {
-        return ['step', 'step_name', 'description', 'duration_s', 'summary', 'error'].indexOf(k) < 0;
+        return ['step', 'step_name', 'description', 'duration_s', 'summary', 'error', 'dream_id', 'details'].indexOf(k) < 0;
     });
     if (extraKeys.length) {
-        html += '<div class="section-title">Details</div>';
+        html += '<div class="section-title">Extra</div>';
         html += '<pre style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;line-height:1.5;">';
         var extraData = {};
         extraKeys.forEach(function(k) { extraData[k] = d[k]; });
