@@ -58,6 +58,76 @@ def _clear_checkpoint(memory_path: Path) -> None:
         path.unlink()
 
 
+def _generate_dream_report(memory_path: Path, dream_id: str, session_start_ts: str) -> Path:
+    """Generate a markdown report from dream session events."""
+    from src.memory.event_log import read_events
+
+    events = read_events(memory_path, source="dream", after=session_start_ts, limit=10_000)
+    events = [e for e in events if e.get("data", {}).get("dream_id") == dream_id]
+
+    session_completed = next(
+        (e for e in events if e["type"] == "dream_session_completed"), None
+    )
+    duration_s = session_completed["data"].get("duration_s", 0) if session_completed else 0
+    steps_failed = session_completed["data"].get("steps_failed", 0) if session_completed else 0
+    status = "completed" if steps_failed == 0 else f"{steps_failed} failed"
+
+    if duration_s >= 60:
+        mins = int(duration_s // 60)
+        secs = int(duration_s % 60)
+        duration_str = f"{mins}m {secs}s"
+    else:
+        duration_str = f"{duration_s:.1f}s"
+
+    date_str = dream_id[:10]
+    lines = [
+        f"# Dream Report — {date_str}",
+        "",
+        f"**Session**: {dream_id} | **Duration**: {duration_str} | **Status**: {status}",
+        "",
+        "## Steps",
+        "",
+        "| # | Step | Status | Duration | Summary |",
+        "|---|------|--------|----------|---------|",
+    ]
+
+    step_completed = {e["data"]["step"]: e for e in events if e["type"] == "dream_step_completed"}
+    step_failed = {e["data"]["step"]: e for e in events if e["type"] == "dream_step_failed"}
+    step_skipped = {e["data"]["step"]: e for e in events if e["type"] == "dream_step_skipped"}
+
+    details_sections = []
+
+    for s in range(1, 11):
+        if s in step_completed:
+            d = step_completed[s]["data"]
+            dur = f"{d['duration_s']:.1f}s" if d.get("duration_s") else "—"
+            lines.append(f"| {s} | {d.get('step_name', '')} | done | {dur} | {d.get('summary', '')} |")
+            if d.get("details"):
+                detail_lines = [f"### {s}. {d.get('step_name', '')}"]
+                for k, v in d["details"].items():
+                    detail_lines.append(f"- {k.replace('_', ' ').title()}: {v}")
+                details_sections.append("\n".join(detail_lines))
+        elif s in step_failed:
+            d = step_failed[s]["data"]
+            dur = f"{d['duration_s']:.1f}s" if d.get("duration_s") else "—"
+            lines.append(f"| {s} | {d.get('step_name', '')} | FAILED | {dur} | {d.get('error', '')} |")
+        elif s in step_skipped:
+            d = step_skipped[s]["data"]
+            lines.append(f"| {s} | {d.get('step_name', '')} | skipped | — | — |")
+
+    if details_sections:
+        lines.append("")
+        lines.append("## Details")
+        lines.append("")
+        lines.extend(details_sections)
+
+    lines.append("")
+
+    report_path = memory_path / "_dream_report.md"
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
 def decide_dream_steps(stats: dict) -> list[int]:
     """Deterministic dream step selection. Replaces LLM coordinator."""
     steps = [1]  # Load always
@@ -365,6 +435,12 @@ def run_dream(
 
     if not dry_run:
         _clear_checkpoint(memory_path)
+
+    # Generate report (even in dry_run — events were logged regardless)
+    try:
+        _generate_dream_report(memory_path, dream_id, session_start_ts)
+    except Exception:
+        pass  # Report generation is best-effort
 
     return report
 
