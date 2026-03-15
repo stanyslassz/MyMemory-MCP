@@ -815,6 +815,8 @@ def _step_merge_entities(
         try:
             _do_merge(keep, drop, graph, memory_path, config, entity_paths)
             report.entities_merged += 1
+            from src.memory.graph import save_graph
+            save_graph(memory_path, graph)
         except Exception as e:
             report.errors.append(f"Merge failed {drop} -> {keep}: {e}")
             console.print(f"    [yellow]Failed: {e}[/yellow]")
@@ -987,6 +989,7 @@ def _step_discover_relations(
                     context=proposal.context,
                 )
                 add_relation(graph, new_rel, strength_growth=config.scoring.relation_strength_growth)
+                save_graph(memory_path, graph)
                 discovered += 1
                 console.print(f"    [green]{entity_a.title} -> {rel_type} -> {entity_b.title}[/green]")
         except Exception as e:
