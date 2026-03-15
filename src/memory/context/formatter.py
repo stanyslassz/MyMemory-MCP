@@ -301,7 +301,7 @@ def _build_section_llm(
     used = 0
     for eid, entity in entities:
         bullet = _build_natural_bullet(eid, entity, graph, memory_path)
-        cost = _estimate_tokens(bullet)
+        cost = _estimate_tokens(bullet, language=config.user_language)
         if used + cost > section_budget and lines:
             break
         lines.append(bullet)

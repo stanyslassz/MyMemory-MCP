@@ -227,7 +227,7 @@ def extract_from_chat(chat_content: str, config: Config, memory_path: "Path | No
     if memory_path is not None:
         existing_context = _build_extraction_context(chat_content, config, memory_path)
 
-    content_tokens = _estimate_tokens(chat_content)
+    content_tokens = _estimate_tokens(chat_content, language=config.user_language)
     prompt_overhead = 1500
     context_window = config.llm_extraction.context_window
     threshold = int(context_window * 0.7)
@@ -246,7 +246,7 @@ def extract_from_chat(chat_content: str, config: Config, memory_path: "Path | No
 
     extractions = []
     for i, segment in enumerate(segments):
-        logger.info("Extracting segment %d/%d (%d tokens)", i + 1, len(segments), _estimate_tokens(segment))
+        logger.info("Extracting segment %d/%d (%d tokens)", i + 1, len(segments), _estimate_tokens(segment, language=config.user_language))
         ext = call_extraction(segment, config, existing_context=existing_context)
         extractions.append(ext)
 
