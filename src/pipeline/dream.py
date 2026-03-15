@@ -175,16 +175,33 @@ def run_dream(
             })
             try:
                 if s == 1:
+                    step_details = {"entities": len(graph.entities), "relations": len(graph.relations)}
                     dashboard.complete_step(s, f"{len(graph.entities)} entities, {len(graph.relations)} relations")
 
                 elif s == 2:
+                    try:
+                        from src.pipeline.indexer import list_unextracted_docs as _list_docs
+                        docs_before = len(_list_docs(config.faiss.manifest_path))
+                    except Exception:
+                        docs_before = 0
                     n = _step_extract_documents(graph, memory_path, config, console, report, dry_run)
+                    step_details = {"docs_found": docs_before, "docs_extracted": n}
                     dashboard.complete_step(s, f"{n} docs extracted" if n else "no docs pending")
 
                 elif s == 3:
                     before = {"total_facts": _count_live_facts(entity_paths)}
+                    consolidated_before = report.facts_consolidated
+                    errors_before = len(report.errors)
                     snapshot = graph.model_copy(deep=True) if not dry_run else None
                     _step_consolidate_facts(graph, entity_paths, config, console, report, dry_run)
+                    consolidated_delta = report.facts_consolidated - consolidated_before
+                    error_delta = len(report.errors) - errors_before
+                    total_candidates = consolidated_delta + error_delta  # rough: processed + errored
+                    step_details = {
+                        "processed": consolidated_delta,
+                        "skipped": max(0, total_candidates - consolidated_delta - error_delta),
+                        "errors": error_delta,
+                    }
                     summary = f"{report.facts_consolidated} consolidated"
                     if report.facts_consolidated > 0 and not dry_run:
                         after = {"total_facts": _count_live_facts(entity_paths)}
@@ -208,8 +225,15 @@ def run_dream(
 
                 elif s == 4:
                     before = {"total_entities": len(graph.entities)}
+                    merged_before = report.entities_merged
                     snapshot = graph.model_copy(deep=True) if not dry_run else None
-                    _step_merge_entities(graph, memory_path, config, console, report, dry_run, entity_paths)
+                    candidates_count = _step_merge_entities(graph, memory_path, config, console, report, dry_run, entity_paths)
+                    merged_delta = report.entities_merged - merged_before
+                    step_details = {
+                        "candidates": candidates_count,
+                        "merged": merged_delta,
+                        "rejected": candidates_count - merged_delta,
+                    }
                     summary = f"{report.entities_merged} merged"
                     if report.entities_merged > 0 and not dry_run:
                         after = {"total_entities": len(graph.entities)}
@@ -233,8 +257,15 @@ def run_dream(
 
                 elif s == 5:
                     before = {"total_relations": len(graph.relations)}
+                    discovered_before = report.relations_discovered
                     snapshot = graph.model_copy(deep=True) if not dry_run else None
-                    _step_discover_relations(graph, memory_path, config, console, report, dry_run)
+                    candidates_count = _step_discover_relations(graph, memory_path, config, console, report, dry_run)
+                    discovered_delta = report.relations_discovered - discovered_before
+                    step_details = {
+                        "candidates": candidates_count,
+                        "created": discovered_delta,
+                        "rejected": candidates_count - discovered_delta,
+                    }
                     summary = f"{report.relations_discovered} discovered"
                     if report.relations_discovered > 0 and not dry_run:
                         after = {"total_relations": len(graph.relations)}
@@ -257,19 +288,32 @@ def run_dream(
                     dashboard.complete_step(s, summary)
 
                 elif s == 6:
+                    transitive_before = report.transitive_relations
                     _step_transitive_relations(graph, memory_path, config, console, report, dry_run)
+                    step_details = {"created": report.transitive_relations - transitive_before}
                     dashboard.complete_step(s, f"{report.transitive_relations} inferred")
 
                 elif s == 7:
+                    pruned_before = report.entities_pruned
                     # Rescore before pruning to avoid using stale scores
                     if not dry_run:
                         from src.memory.scoring import recalculate_all_scores as _rescore
                         graph = _rescore(graph, config)
                     _step_prune_dead(graph, memory_path, config, console, report, dry_run)
+                    step_details = {"archived": report.entities_pruned - pruned_before}
                     dashboard.complete_step(s, f"{report.entities_pruned} pruned")
 
                 elif s == 8:
+                    summaries_before = report.summaries_generated
+                    errors_before = len(report.errors)
+                    already_have_summary = sum(1 for e in graph.entities.values() if e.summary)
                     _step_generate_summaries(graph, entity_paths, config, console, report, dry_run)
+                    summaries_delta = report.summaries_generated - summaries_before
+                    step_details = {
+                        "generated": summaries_delta,
+                        "skipped": already_have_summary,
+                        "errors": len(report.errors) - errors_before,
+                    }
                     dashboard.complete_step(s, f"{report.summaries_generated} generated")
 
                 elif s == 9:
@@ -278,11 +322,13 @@ def run_dream(
                         from src.memory.graph import save_graph
                         graph = recalculate_all_scores(graph, config)
                         save_graph(memory_path, graph)
+                    step_details = {"entities_scored": len(graph.entities)}
                     dashboard.complete_step(s, "scores updated")
 
                 elif s == 10:
                     if not dry_run:
                         _step_rebuild(graph, memory_path, config, console)
+                    step_details = {}
                     dashboard.complete_step(s, "context + FAISS rebuilt")
 
                 append_event(memory_path, "dream_step_completed", "dream", {
@@ -687,7 +733,7 @@ def _step_merge_entities(
     report: DreamReport,
     dry_run: bool,
     entity_paths: dict[str, Path] | None = None,
-) -> None:
+) -> int:
     """Step 4: Detect and merge duplicate entities (slug similarity + FAISS)."""
     # Group by slug similarity (prefix match or containment)
     slugs = list(graph.entities.keys())
@@ -717,7 +763,7 @@ def _step_merge_entities(
 
     if not merge_candidates:
         console.print("  No duplicate entities detected")
-        return
+        return 0
 
     # Track which pairs came from FAISS (need LLM confirmation)
     faiss_pair_set = {tuple(sorted(p)) for p in faiss_candidates}
@@ -772,6 +818,8 @@ def _step_merge_entities(
         except Exception as e:
             report.errors.append(f"Merge failed {drop} -> {keep}: {e}")
             console.print(f"    [yellow]Failed: {e}[/yellow]")
+
+    return len(merge_candidates)
 
 
 def _do_merge(
@@ -862,7 +910,7 @@ def _step_discover_relations(
     console: Console,
     report: DreamReport,
     dry_run: bool,
-) -> None:
+) -> int:
     """Step 5: Use FAISS similarity + LLM to discover new relations."""
     from src.memory.rag import search as rag_search, SearchOptions
     from src.memory.graph import add_relation, save_graph
@@ -899,7 +947,7 @@ def _step_discover_relations(
 
     if not candidates:
         console.print("  No new relation candidates found")
-        return
+        return 0
 
     console.print(f"  Found {len(candidates)} candidate pair(s) to evaluate")
 
@@ -948,6 +996,8 @@ def _step_discover_relations(
     if discovered and not dry_run:
         save_graph(memory_path, graph)
         console.print(f"  [green]Discovered {discovered} new relation(s)[/green]")
+
+    return len(candidates)
 
 
 def _build_dossier(eid: str, entity, memory_path: Path) -> str:
