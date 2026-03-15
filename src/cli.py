@@ -504,14 +504,24 @@ def consolidate(ctx, dry_run, facts, min_facts):
 @click.option("--step", type=int, default=None, help="Run only step N (1-10)")
 @click.option("--resume", is_flag=True, help="Resume from last checkpoint")
 @click.option("--reset", is_flag=True, help="Clear checkpoint and restart")
+@click.option("--report", "show_report", is_flag=True, help="Show last dream report and exit")
 @click.pass_context
-def dream(ctx, dry_run, step, resume, reset):
+def dream(ctx, dry_run, step, resume, reset, show_report):
     """Brain-like memory reorganization: consolidate, prune, discover, rebuild.
 
     10 steps: load → extract docs → consolidate facts → merge entities
     → discover relations → transitive relations → prune dead → generate summaries
     → rescore → rebuild. LLM coordinator plans which steps to run.
     """
+    if show_report:
+        config = ctx.obj["config"]
+        report_path = config.memory_path / "_dream_report.md"
+        if report_path.exists():
+            click.echo(report_path.read_text(encoding="utf-8"))
+        else:
+            click.echo("No dream report found. Run `memory dream` first.")
+        return
+
     from src.pipeline.dream import run_dream
 
     config = ctx.obj["config"]
