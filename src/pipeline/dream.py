@@ -997,7 +997,6 @@ def _step_discover_relations(
 
     report.relations_discovered = discovered
     if discovered and not dry_run:
-        save_graph(memory_path, graph)
         console.print(f"  [green]Discovered {discovered} new relation(s)[/green]")
 
     return len(candidates)
@@ -1270,6 +1269,8 @@ def _step_generate_summaries(
                 fm.summary = summary
                 entity.summary = summary
                 write_entity(path, fm, sections)
+                from src.memory.graph import save_graph as _sg
+                _sg(config.memory_path, graph)
                 report.summaries_generated += 1
                 display = f"{summary[:60]}..." if len(summary) > 60 else summary
                 console.print(f"  [green]{entity.title}: {display}[/green]")
