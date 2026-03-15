@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import time
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from rich.console import Console
 
 from src.core.config import Config
 from src.core.models import GraphData, GraphRelation, RelationType
+from src.memory.event_log import append_event
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,7 @@ def run_dream(
     Uses LLM coordinator to plan steps when running full pipeline.
     Dashboard shows real-time progress via Rich Live.
     """
-    from src.pipeline.dream_dashboard import DreamDashboard
+    from src.pipeline.dream_dashboard import DreamDashboard, DREAM_STEPS
 
     report = DreamReport()
     memory_path = config.memory_path
@@ -139,13 +141,38 @@ def run_dream(
     if 1 not in steps_to_run:
         steps_to_run.insert(0, 1)
 
+    resumed = bool(resume and checkpoint)
+    session_start_ts = datetime.now().isoformat()
+    t0_session = time.monotonic()
+    append_event(memory_path, "dream_session_started", "dream", {
+        "dream_id": dream_id,
+        "steps_planned": steps_to_run,
+        "resumed": resumed,
+        "entity_count": len(graph.entities),
+        "relation_count": len(graph.relations),
+    })
+
     with DreamDashboard(console) as dashboard:
         for s in range(1, 11):
             if s not in steps_to_run:
                 dashboard.skip_step(s)
+                step_name = DREAM_STEPS.get(s, {}).get("name", f"step_{s}")
+                append_event(memory_path, "dream_step_skipped", "dream", {
+                    "dream_id": dream_id,
+                    "step": s,
+                    "step_name": step_name,
+                })
                 continue
 
             dashboard.start_step(s)
+            step_name = DREAM_STEPS.get(s, {}).get("name", f"step_{s}")
+            t0 = time.monotonic()
+            step_details: dict = {}
+            append_event(memory_path, "dream_step_started", "dream", {
+                "dream_id": dream_id,
+                "step": s,
+                "step_name": step_name,
+            })
             try:
                 if s == 1:
                     dashboard.complete_step(s, f"{len(graph.entities)} entities, {len(graph.relations)} relations")
@@ -168,6 +195,13 @@ def run_dream(
                             save_graph(memory_path, graph)
                             logger.warning("Dream step %d rolled back: %s", s, issues)
                             dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            append_event(memory_path, "dream_step_failed", "dream", {
+                                "dream_id": dream_id,
+                                "step": s,
+                                "step_name": step_name,
+                                "duration_s": round(time.monotonic() - t0, 3),
+                                "error": f"rolled back: {'; '.join(issues)}",
+                            })
                             continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
@@ -186,6 +220,13 @@ def run_dream(
                             save_graph(memory_path, graph)
                             logger.warning("Dream step %d rolled back: %s", s, issues)
                             dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            append_event(memory_path, "dream_step_failed", "dream", {
+                                "dream_id": dream_id,
+                                "step": s,
+                                "step_name": step_name,
+                                "duration_s": round(time.monotonic() - t0, 3),
+                                "error": f"rolled back: {'; '.join(issues)}",
+                            })
                             continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
@@ -204,6 +245,13 @@ def run_dream(
                             save_graph(memory_path, graph)
                             logger.warning("Dream step %d rolled back: %s", s, issues)
                             dashboard.fail_step(s, f"rolled back: {'; '.join(issues)[:40]}")
+                            append_event(memory_path, "dream_step_failed", "dream", {
+                                "dream_id": dream_id,
+                                "step": s,
+                                "step_name": step_name,
+                                "duration_s": round(time.monotonic() - t0, 3),
+                                "error": f"rolled back: {'; '.join(issues)}",
+                            })
                             continue
                         summary = _validate_step(s, summary, before, after, report)
                     dashboard.complete_step(s, summary)
@@ -237,12 +285,37 @@ def run_dream(
                         _step_rebuild(graph, memory_path, config, console)
                     dashboard.complete_step(s, "context + FAISS rebuilt")
 
+                append_event(memory_path, "dream_step_completed", "dream", {
+                    "dream_id": dream_id,
+                    "step": s,
+                    "step_name": step_name,
+                    "duration_s": round(time.monotonic() - t0, 3),
+                    "summary": dashboard._steps[s]["summary"],
+                    "details": step_details,
+                })
+
                 if not dry_run:
                     _save_checkpoint(memory_path, dream_id, s, steps_to_run)
 
             except Exception as e:
                 dashboard.fail_step(s, str(e)[:50])
+                append_event(memory_path, "dream_step_failed", "dream", {
+                    "dream_id": dream_id,
+                    "step": s,
+                    "step_name": step_name,
+                    "duration_s": round(time.monotonic() - t0, 3),
+                    "error": str(e),
+                })
                 report.errors.append(f"Step {s} failed: {e}")
+
+    steps_completed = sum(1 for st in dashboard._steps.values() if st["status"] == "done")
+    steps_failed = sum(1 for st in dashboard._steps.values() if st["status"] == "failed")
+    append_event(memory_path, "dream_session_completed", "dream", {
+        "dream_id": dream_id,
+        "duration_s": round(time.monotonic() - t0_session, 3),
+        "steps_completed": steps_completed,
+        "steps_failed": steps_failed,
+    })
 
     if not dry_run:
         _clear_checkpoint(memory_path)
