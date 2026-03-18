@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
+import logging
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,27 +11,9 @@ from typing import Any
 import yaml
 
 from src.core.models import EntityFrontmatter
-from src.core.utils import parse_frontmatter as _shared_parse_frontmatter
+from src.core.utils import atomic_write_text as _atomic_write_text, parse_frontmatter as _shared_parse_frontmatter
 
-
-def _atomic_write_text(filepath: Path, content: str) -> None:
-    """Write content to file atomically via temp file + os.replace."""
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
-    try:
-        os.write(fd, content.encode("utf-8"))
-        os.close(fd)
-        os.replace(tmp, filepath)
-    except BaseException:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+logger = logging.getLogger(__name__)
 
 
 def init_memory_structure(memory_path: Path) -> None:
@@ -48,7 +29,7 @@ def read_entity(filepath: Path) -> tuple[EntityFrontmatter, dict[str, list[str]]
     Sections is a dict like {"Facts": [...lines], "Relations": [...lines], "History": [...lines]}.
     """
     text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _parse_frontmatter(text)
+    fm_data, body = _shared_parse_frontmatter(text)
     frontmatter = EntityFrontmatter.model_validate(fm_data)
     sections = _parse_sections(body)
     return frontmatter, sections
@@ -87,8 +68,6 @@ def update_entity(
     monthly_buckets: dict[str, int] | None = None,
 ) -> EntityFrontmatter:
     """Update an existing entity: add observations, relations, bump frequency."""
-    import logging
-    _logger = logging.getLogger(__name__)
 
     frontmatter, sections = read_entity(filepath)
 
@@ -96,14 +75,14 @@ def update_entity(
     if new_observations:
         existing_facts = sections.get("Facts", [])
         for obs in new_observations:
-            line = _format_observation(obs)
+            line = format_observation(obs)
             if not _is_duplicate_observation(line, existing_facts):
                 existing_facts.append(line)
         # Hard cap safety net: if way over limit, keep most recent
         if max_facts:
             live_facts = [f for f in existing_facts if "[superseded]" not in f]
             if len(live_facts) > max_facts * 2:
-                _logger.warning(
+                logger.warning(
                     "Entity %s has %d facts (cap %d), truncating to %d most recent",
                     frontmatter.title, len(live_facts), max_facts, max_facts * 2,
                 )
@@ -151,7 +130,7 @@ def create_entity(
 
     if observations:
         for obs in observations:
-            line = _format_observation(obs)
+            line = format_observation(obs)
             sections["Facts"].append(line)
 
     if relations:
@@ -261,9 +240,7 @@ def consolidate_entity_facts(
 
     # If deterministic dedup brought us under max_facts, skip the LLM call
     if len(deduped_facts) <= effective_max:
-        import logging
-        _logger = logging.getLogger(__name__)
-        _logger.info(
+        logger.info(
             "Deterministic dedup sufficient for %s: %d → %d facts (max %d)",
             frontmatter.title, len(live_facts), len(deduped_facts), effective_max,
         )
@@ -311,7 +288,7 @@ def consolidate_entity_facts(
             "valence": cf.valence,
             "tags": cf.tags[:3],  # Max 3 tags per fact
         }
-        new_facts.append(_format_observation(obs))
+        new_facts.append(format_observation(obs))
 
     # Preserve superseded facts
     new_facts.extend(superseded_facts)
@@ -379,7 +356,7 @@ def list_unprocessed_chats(memory_path: Path) -> list[Path]:
     unprocessed = []
     for md_file in sorted(chats_dir.glob("*.md")):
         text = md_file.read_text(encoding="utf-8")
-        fm_data, _ = _parse_frontmatter(text)
+        fm_data, _ = _shared_parse_frontmatter(text)
         if not fm_data.get("processed", False):
             unprocessed.append(md_file)
     return unprocessed
@@ -392,7 +369,7 @@ def mark_chat_processed(
 ) -> None:
     """Mark a chat file as processed by updating its frontmatter."""
     text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _parse_frontmatter(text)
+    fm_data, body = _shared_parse_frontmatter(text)
 
     fm_data["processed"] = True
     fm_data["processed_at"] = datetime.now().isoformat()
@@ -413,7 +390,7 @@ def mark_chat_fallback(
     Sets processed=True plus fallback metadata so it is never retried for extraction.
     """
     text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _parse_frontmatter(text)
+    fm_data, body = _shared_parse_frontmatter(text)
 
     fm_data["processed"] = True
     fm_data["processed_at"] = datetime.now().isoformat()
@@ -430,7 +407,7 @@ def mark_chat_fallback(
 def increment_extraction_retries(filepath: Path) -> int:
     """Increment and return the extraction_retries counter in chat frontmatter."""
     text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _parse_frontmatter(text)
+    fm_data, body = _shared_parse_frontmatter(text)
 
     retries = fm_data.get("extraction_retries", 0) + 1
     fm_data["extraction_retries"] = retries
@@ -443,16 +420,11 @@ def increment_extraction_retries(filepath: Path) -> int:
 def get_chat_content(filepath: Path) -> str:
     """Read a chat file and return only the body content (no frontmatter)."""
     text = filepath.read_text(encoding="utf-8")
-    _, body = _parse_frontmatter(text)
+    _, body = _shared_parse_frontmatter(text)
     return body
 
 
 # ── Private helpers ──────────────────────────────────────────
-
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from a markdown file. Delegates to shared util."""
-    return _shared_parse_frontmatter(text)
-
 
 def _parse_sections(body: str) -> dict[str, list[str]]:
     """Parse markdown sections (## Header) from body text."""
@@ -546,24 +518,19 @@ def parse_observation(line: str) -> dict | None:
     return result
 
 
-# Backward-compatible aliases
-_parse_observation = parse_observation
-_format_observation = format_observation
-
-
 def _is_duplicate_observation(new_line: str, existing_lines: list[str]) -> bool:
     """Check if an observation is a duplicate (same category + similar content).
 
     Ignores date/valence/tags in comparison — only category + content matter.
     Skips superseded lines when checking for duplicates.
     """
-    new_obs = _parse_observation(new_line)
+    new_obs = parse_observation(new_line)
     if not new_obs:
         return False
     new_cat, new_content = new_obs["category"], new_obs["content"].lower()
 
     for existing in existing_lines:
-        ex_obs = _parse_observation(existing)
+        ex_obs = parse_observation(existing)
         if not ex_obs:
             continue
         if ex_obs.get("superseded"):
@@ -615,12 +582,12 @@ def mark_observation_superseded(
     supersedes_lower = supersedes_text.lower()
     result = []
     for line in existing_facts:
-        obs = _parse_observation(line)
+        obs = parse_observation(line)
         if (obs and not obs.get("superseded")
                 and obs["category"] == category
                 and supersedes_lower in obs["content"].lower()):
             obs["superseded"] = True
-            result.append(_format_observation(obs))
+            result.append(format_observation(obs))
         else:
             result.append(line)
     return result

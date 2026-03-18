@@ -749,14 +749,19 @@ def _find_faiss_dedup_candidates(
     memory_path: Path,
     config: Config,
     already_paired: set[tuple[str, str]],
-    similarity_threshold: float = 0.80,
-    max_candidates: int = 20,
+    similarity_threshold: float | None = None,
+    max_candidates: int | None = None,
 ) -> list[tuple[str, str]]:
     """Find potential duplicate entities via FAISS similarity search.
 
     Returns pairs not already covered by deterministic matching.
     These candidates require LLM confirmation before merging.
     """
+    if similarity_threshold is None:
+        similarity_threshold = config.dream.faiss_merge_threshold
+    if max_candidates is None:
+        max_candidates = config.dream.faiss_merge_max_candidates
+
     try:
         from src.memory.rag import search as rag_search, SearchOptions
     except Exception:
@@ -855,14 +860,14 @@ def _step_merge_entities(
         if pair_key in faiss_pair_set and not dry_run:
             try:
                 from src.core.llm import call_dedup_check
-                dossier_a = _build_dossier(slug_a, entity_a, memory_path)
-                dossier_b = _build_dossier(slug_b, entity_b, memory_path)
+                dossier_a = _build_dossier(slug_a, entity_a, memory_path, config)
+                dossier_b = _build_dossier(slug_b, entity_b, memory_path, config)
                 verdict = call_dedup_check(
                     entity_a.title, entity_a.type, dossier_a,
                     entity_b.title, entity_b.type, dossier_b,
                     config,
                 )
-                if not verdict.is_duplicate or verdict.confidence < 0.7:
+                if not verdict.is_duplicate or verdict.confidence < config.dream.dedup_confidence_threshold:
                     console.print(
                         f"  [dim]LLM rejected merge: {entity_a.title} / {entity_b.title} "
                         f"(confidence={verdict.confidence:.2f}, reason={verdict.reason})[/dim]"
@@ -1038,8 +1043,8 @@ def _step_discover_relations(
         if not entity_a or not entity_b:
             continue
 
-        dossier_a = _build_dossier(eid_a, entity_a, memory_path)
-        dossier_b = _build_dossier(eid_b, entity_b, memory_path)
+        dossier_a = _build_dossier(eid_a, entity_a, memory_path, config)
+        dossier_b = _build_dossier(eid_b, entity_b, memory_path, config)
 
         if dry_run:
             console.print(f"  [dim]Would evaluate: {entity_a.title} <-> {entity_b.title}[/dim]")
@@ -1078,10 +1083,11 @@ def _step_discover_relations(
     return len(candidates)
 
 
-def _build_dossier(eid: str, entity, memory_path: Path) -> str:
+def _build_dossier(eid: str, entity, memory_path: Path, config: Config | None = None) -> str:
     """Build a compact dossier string for an entity."""
     from src.memory.store import read_entity
 
+    max_facts = config.dream.dossier_max_facts if config else 3
     path = memory_path / entity.file
     facts_text = ""
     if path.exists():
@@ -1089,7 +1095,7 @@ def _build_dossier(eid: str, entity, memory_path: Path) -> str:
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
             live_facts = [f for f in facts if "[superseded]" not in f]
-            facts_text = "\n".join(live_facts[:3])  # Top 3 facts only
+            facts_text = "\n".join(live_facts[:max_facts])
         except Exception:
             pass
 
@@ -1121,8 +1127,8 @@ def _step_transitive_relations(
     console: Console,
     report: DreamReport,
     dry_run: bool,
-    min_strength: float = 0.4,
-    max_new: int = 20,
+    min_strength: float | None = None,
+    max_new: int | None = None,
 ) -> None:
     """Step 6: Infer transitive relations (deterministic, no LLM).
 
@@ -1130,6 +1136,11 @@ def _step_transitive_relations(
     apply transitive rules to create inferred relations with reduced strength.
     """
     from src.memory.graph import add_relation, save_graph
+
+    if min_strength is None:
+        min_strength = config.dream.transitive_min_strength
+    if max_new is None:
+        max_new = config.dream.transitive_max_new
 
     # Build adjacency: entity -> list of (target, relation)
     adjacency: dict[str, list[tuple[str, GraphRelation]]] = defaultdict(list)
@@ -1362,16 +1373,13 @@ def _step_rebuild(
     console: Console,
 ) -> None:
     """Step 10: Rebuild context and FAISS index."""
-    from src.memory.context import build_context, build_natural_context, write_context, write_index
+    from src.memory.context import build_context_for_config, write_context, write_index
     from src.memory.graph import save_graph
     from src.pipeline.indexer import build_index
 
     save_graph(memory_path, graph)
 
-    if getattr(config, "context_format", "structured") == "natural":
-        context_text = build_natural_context(graph, memory_path, config)
-    else:
-        context_text = build_context(graph, memory_path, config)
+    context_text = build_context_for_config(graph, memory_path, config, use_llm=False)
     if context_text.strip():
         write_context(memory_path, context_text)
         console.print("  [green]_context.md updated[/green]")

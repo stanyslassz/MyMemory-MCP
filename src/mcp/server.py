@@ -12,8 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 from src.core.config import Config, load_config
 from src.core.models import GraphData
-from src.core.utils import slugify
-from src.memory.graph import load_graph, remove_relation, save_graph
+from src.memory.graph import find_entity_by_name, load_graph, remove_relation, save_graph
 from src.memory.store import (
     read_entity,
     remove_relation_line,
@@ -169,20 +168,13 @@ def search_rag(query: str) -> dict:
     }
 
 
-# ── Helper: resolve entity name → entity_id ────────────────
-
-
-def _resolve_entity_by_name(name: str, graph: GraphData) -> str | None:
-    """Resolve entity name to entity_id via slug, title, or alias match."""
-    slug = slugify(name)
-    if slug in graph.entities:
-        return slug
-    for eid, e in graph.entities.items():
-        if e.title.lower() == name.lower():
-            return eid
-    for eid, e in graph.entities.items():
-        if any(a.lower() == name.lower() for a in (e.aliases or [])):
-            return eid
+def _find_fact_line(facts: list[str], content: str) -> int | None:
+    """Find a fact line by case-insensitive substring match on content. Returns index or None."""
+    content_lower = content.lower()
+    for i, line in enumerate(facts):
+        obs = parse_observation(line)
+        if obs and content_lower in obs["content"].lower():
+            return i
     return None
 
 
@@ -193,7 +185,7 @@ def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> st
     """Implementation for delete_fact. Returns JSON string."""
     memory_path = config.memory_path
     graph = load_graph(memory_path)
-    entity_id = _resolve_entity_by_name(entity_name, graph)
+    entity_id = find_entity_by_name(entity_name, graph)
     if not entity_id:
         return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
 
@@ -205,15 +197,7 @@ def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> st
     frontmatter, sections = read_entity(filepath)
     facts = sections.get("Facts", [])
 
-    # Find matching fact (case-insensitive substring match on content)
-    content_lower = fact_content.lower()
-    matched_idx = None
-    for i, line in enumerate(facts):
-        obs = parse_observation(line)
-        if obs and content_lower in obs["content"].lower():
-            matched_idx = i
-            break
-
+    matched_idx = _find_fact_line(facts, fact_content)
     if matched_idx is None:
         return json.dumps({"status": "error", "message": f"Fact containing '{fact_content}' not found in {entity.title}"})
 
@@ -240,11 +224,11 @@ def _delete_relation_impl(from_entity: str, to_entity: str, relation_type: str, 
     memory_path = config.memory_path
     graph = load_graph(memory_path)
 
-    from_id = _resolve_entity_by_name(from_entity, graph)
+    from_id = find_entity_by_name(from_entity, graph)
     if not from_id:
         return json.dumps({"status": "error", "message": f"Source entity '{from_entity}' not found"})
 
-    to_id = _resolve_entity_by_name(to_entity, graph)
+    to_id = find_entity_by_name(to_entity, graph)
     if not to_id:
         return json.dumps({"status": "error", "message": f"Target entity '{to_entity}' not found"})
 
@@ -277,7 +261,7 @@ def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, conf
     """Implementation for modify_fact. Returns JSON string."""
     memory_path = config.memory_path
     graph = load_graph(memory_path)
-    entity_id = _resolve_entity_by_name(entity_name, graph)
+    entity_id = find_entity_by_name(entity_name, graph)
     if not entity_id:
         return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
 
@@ -289,15 +273,7 @@ def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, conf
     frontmatter, sections = read_entity(filepath)
     facts = sections.get("Facts", [])
 
-    # Find matching fact
-    content_lower = old_content.lower()
-    matched_idx = None
-    for i, line in enumerate(facts):
-        obs = parse_observation(line)
-        if obs and content_lower in obs["content"].lower():
-            matched_idx = i
-            break
-
+    matched_idx = _find_fact_line(facts, old_content)
     if matched_idx is None:
         return json.dumps({"status": "error", "message": f"Fact containing '{old_content}' not found in {entity.title}"})
 
@@ -337,7 +313,7 @@ def _correct_entity_impl(entity_name: str, field: str, new_value: str, config: C
 
     memory_path = config.memory_path
     graph = load_graph(memory_path)
-    entity_id = _resolve_entity_by_name(entity_name, graph)
+    entity_id = find_entity_by_name(entity_name, graph)
     if not entity_id:
         return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
 

@@ -26,6 +26,21 @@ RelationType = Literal[
     "part_of", "contrasts_with", "precedes",
 ]
 
+# Color mapping for entity types (used by dashboard + visualize)
+TYPE_COLORS: dict[str, str] = {
+    "person": "#4FC3F7",
+    "health": "#EF5350",
+    "work": "#66BB6A",
+    "project": "#FFA726",
+    "interest": "#AB47BC",
+    "place": "#26A69A",
+    "animal": "#8D6E63",
+    "organization": "#5C6BC0",
+    "ai_self": "#EC407A",
+}
+
+DEFAULT_TYPE_COLOR = "#90A4AE"
+
 
 # ── Step 1: Raw extraction output ────────────────────────────
 

@@ -115,7 +115,7 @@ def discover_batch_relations(
             other = graph.entities[other_id]
             # Tag overlap: 2+ shared tags + high FAISS score
             shared_tags = set(entity.tags or []) & set(other.tags or [])
-            if len(shared_tags) >= 2 and result.score >= 0.8:
+            if len(shared_tags) >= 2 and result.score >= config.scoring.batch_relation_threshold:
                 new_rel = GraphRelation(
                     from_entity=eid, to_entity=other_id,
                     type="linked_to",
@@ -362,21 +362,9 @@ def run_pipeline(config, console, *, consolidate: bool = True) -> None:
     # Step 7: Generate context
     try:
         graph = load_graph(memory_path)
-        use_llm = consolidate and getattr(config, "context_llm_sections", False)
-        if getattr(config, "context_format", "structured") == "natural":
-            use_natural_llm = consolidate and getattr(config, "context_llm_sections", False)
-            label = "natural + LLM" if use_natural_llm else "natural"
-            console.print(f"\n[bold]Generating context ({label})...[/bold]")
-            from src.memory.context import build_natural_context
-            context_text = build_natural_context(graph, memory_path, config, use_llm=use_natural_llm)
-        elif use_llm:
-            console.print("\n[bold]Generating context (LLM per-section)...[/bold]")
-            from src.memory.context import build_context_with_llm
-            context_text = build_context_with_llm(graph, memory_path, config)
-        else:
-            console.print("\n[bold]Generating context (deterministic)...[/bold]")
-            from src.memory.context import build_context
-            context_text = build_context(graph, memory_path, config)
+        from src.memory.context import build_context_for_config
+        console.print("\n[bold]Generating context...[/bold]")
+        context_text = build_context_for_config(graph, memory_path, config, use_llm=consolidate)
         if context_text.strip():
             write_context(memory_path, context_text)
             console.print("  [green]_context.md updated[/green]")
@@ -445,10 +433,10 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
 
             should_link = False
             context_reason = ""
-            if len(shared_tags) >= 2 and result.score >= 0.75:
+            if len(shared_tags) >= 2 and result.score >= config.scoring.relation_discovery_threshold:
                 should_link = True
                 context_reason = f"tag overlap ({', '.join(sorted(shared_tags))}) + FAISS {result.score:.2f}"
-            elif result.score >= 0.80 and entity.type == other.type:
+            elif result.score >= config.scoring.relation_discovery_type_threshold and entity.type == other.type:
                 should_link = True
                 context_reason = f"same type ({entity.type}) + FAISS {result.score:.2f}"
 

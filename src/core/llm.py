@@ -292,36 +292,6 @@ def call_arbitration(
     return _call_structured(config.llm_arbitration, prompt, EntityResolution)
 
 
-def call_context_generation(enriched_data: str, config: Config) -> str:
-    """Step 7: Generate _context.md from enriched data. Returns free-text markdown."""
-    from datetime import date
-
-    budget_str = "\n".join(f"- {k}: {v}%" for k, v in config.context_budget.items())
-    prompt = load_prompt(
-        "generate_context",
-        config,
-        context_max_tokens=str(config.context_max_tokens),
-        enriched_data=enriched_data,
-        context_budget=budget_str,
-        date=date.today().isoformat(),
-    )
-
-    step_config = config.llm_context
-    kwargs: dict[str, Any] = {
-        "model": step_config.model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": step_config.temperature,
-    }
-    if step_config.timeout:
-        kwargs["timeout"] = step_config.timeout
-    if step_config.api_base:
-        kwargs["api_base"] = step_config.api_base
-
-    response = litellm.completion(**kwargs)
-    text = response.choices[0].message.content or ""
-    return strip_thinking(text)
-
-
 def call_context_section(
     section_name: str,
     entities_dossier: str,

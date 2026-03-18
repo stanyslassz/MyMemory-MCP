@@ -13,8 +13,8 @@ from src.memory.store import (
     write_entity,
     remove_relation_line,
 )
+from src.memory.graph import find_entity_by_name as _resolve_entity_by_name
 from src.mcp.server import (
-    _resolve_entity_by_name,
     _delete_fact_impl,
     _delete_relation_impl,
     _modify_fact_impl,

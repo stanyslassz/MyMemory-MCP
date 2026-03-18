@@ -17,7 +17,7 @@ class KeywordResult:
     bm25_score: float
 
 
-def build_keyword_index(memory_path: Path, db_path: Path) -> int:
+def build_keyword_index(memory_path: Path, db_path: Path, *, chunk_size: int = 300, chunk_overlap: int = 60) -> int:
     """Build SQLite FTS5 index from entity MD files. Returns chunk count."""
     if db_path.exists():
         db_path.unlink()
@@ -67,10 +67,8 @@ def build_keyword_index(memory_path: Path, db_path: Path) -> int:
 
         full_text = f"{title}\n" + "\n".join(facts_lines)
 
-        # Chunk (~300 words per chunk, 60 word overlap)
         words = full_text.split()
-        chunk_size = 300
-        overlap = 60
+        overlap = chunk_overlap
         i = 0
         chunk_idx = 0
         while i < len(words):

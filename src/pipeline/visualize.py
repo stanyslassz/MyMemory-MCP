@@ -10,22 +10,7 @@ import json
 import webbrowser
 from pathlib import Path
 
-from src.core.models import GraphData
-
-# Color mapping for entity types
-_TYPE_COLORS = {
-    "person": "#4FC3F7",
-    "health": "#EF5350",
-    "work": "#66BB6A",
-    "project": "#FFA726",
-    "interest": "#AB47BC",
-    "place": "#26A69A",
-    "animal": "#8D6E63",
-    "organization": "#5C6BC0",
-    "ai_self": "#EC407A",
-}
-
-_DEFAULT_COLOR = "#90A4AE"
+from src.core.models import DEFAULT_TYPE_COLOR as _DEFAULT_COLOR, TYPE_COLORS as _TYPE_COLORS, GraphData
 
 
 def generate_graph_html(graph: GraphData, output_path: Path, memory_path: Path | None = None) -> Path:

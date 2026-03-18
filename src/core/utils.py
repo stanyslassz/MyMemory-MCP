@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 import unicodedata
+from pathlib import Path
 
 import yaml
 
@@ -28,6 +31,26 @@ def estimate_tokens(text: str, language: str = "en") -> int:
     """
     ratio = 1.5 if language in _ROMANCE_LANGUAGES else 1.3
     return int(len(text.split()) * ratio)
+
+
+def atomic_write_text(filepath: Path, content: str) -> None:
+    """Write content to file atomically via temp file + os.replace."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        os.replace(tmp, filepath)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:

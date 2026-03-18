@@ -2,6 +2,7 @@
 
 from src.memory.context.builder import (
     build_context,
+    build_context_for_config,
     build_natural_context,
     build_context_with_llm,
     write_context,
@@ -29,6 +30,7 @@ from src.memory.context.utilities import (
 
 __all__ = [
     "build_context",
+    "build_context_for_config",
     "build_natural_context",
     "build_context_with_llm",
     "write_context",

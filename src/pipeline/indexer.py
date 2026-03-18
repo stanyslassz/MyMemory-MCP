@@ -329,7 +329,7 @@ def incremental_update(memory_path: Path, config: Config) -> dict:
             from src.pipeline.keyword_index import build_keyword_index
 
             fts_db_path = memory_path / config.search.fts_db_path
-            build_keyword_index(memory_path, fts_db_path)
+            build_keyword_index(memory_path, fts_db_path, chunk_size=config.embeddings.chunk_size, chunk_overlap=config.embeddings.chunk_overlap)
         except Exception:
             logger.warning("Failed to build FTS5 keyword index", exc_info=True)
         return manifest
@@ -356,7 +356,7 @@ def incremental_update(memory_path: Path, config: Config) -> dict:
         from src.pipeline.keyword_index import build_keyword_index
 
         fts_db_path = memory_path / config.search.fts_db_path
-        build_keyword_index(memory_path, fts_db_path)
+        build_keyword_index(memory_path, fts_db_path, chunk_size=config.embeddings.chunk_size, chunk_overlap=config.embeddings.chunk_overlap)
     except Exception:
         logger.warning("Failed to build FTS5 keyword index", exc_info=True)
 

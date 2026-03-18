@@ -59,6 +59,9 @@ class ScoringConfig:
     ltd_onset_days: int = 90
     min_relation_strength: float = 0.1
     activation_noise: float = 0.0
+    batch_relation_threshold: float = 0.8
+    relation_discovery_threshold: float = 0.75
+    relation_discovery_type_threshold: float = 0.80
 
 
 @dataclass
@@ -121,6 +124,7 @@ class DreamConfig:
     prune_max_frequency: int = 1
     transitive_min_strength: float = 0.4
     transitive_max_new: int = 20
+    dedup_confidence_threshold: float = 0.7
 
 
 @dataclass
@@ -143,6 +147,15 @@ class FactTTLConfig:
     user_reaction: int = 60
     interaction_rule: int = 0
     interpersonal: int = 0
+
+
+@dataclass
+class ExtractionConfig:
+    """Parameters for chat extraction splitting."""
+    prompt_overhead: int = 1500
+    split_threshold: float = 0.7
+    segment_ratio: float = 0.5
+    overlap_tokens: int = 200
 
 
 @dataclass
@@ -196,6 +209,7 @@ class Config:
     dream: DreamConfig = field(default_factory=DreamConfig)
     fact_ttl: FactTTLConfig = field(default_factory=FactTTLConfig)
     ctx: ContextConfig = field(default_factory=ContextConfig)
+    extraction: ExtractionConfig = field(default_factory=ExtractionConfig)
     context_llm_sections: bool = False
     context_format: str = "structured"  # "structured" (default) or "natural" (Claude Chat-like)
     max_facts: dict[str, int] = field(default_factory=lambda: {"default": 50, "ai_self": 20})
@@ -270,6 +284,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
     search_cfg = raw.get("search", {})
     ttl_cfg = raw.get("fact_ttl", {})
     ctx_cfg = raw.get("context", {})
+    extraction_cfg = raw.get("extraction", {})
 
 
     memory_path = _resolve_path(project_root, mem.get("path", "./memory"))
@@ -315,6 +330,9 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             ltd_onset_days=scoring.get("ltd_onset_days", 90),
             min_relation_strength=scoring.get("min_relation_strength", 0.1),
             activation_noise=scoring.get("activation_noise", 0.0),
+            batch_relation_threshold=scoring.get("batch_relation_threshold", 0.8),
+            relation_discovery_threshold=scoring.get("relation_discovery_threshold", 0.75),
+            relation_discovery_type_threshold=scoring.get("relation_discovery_type_threshold", 0.80),
         ),
         faiss=FAISSConfig(
             index_path=str(_resolve_path(project_root, faiss_cfg.get("index_path", "./memory/_memory.faiss"))),
@@ -365,4 +383,5 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
         dream=DreamConfig(**{k: v for k, v in raw.get("dream", {}).items() if hasattr(DreamConfig, k)}),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),
         ctx=ContextConfig(**{k: v for k, v in ctx_cfg.items() if hasattr(ContextConfig, k)}),
+        extraction=ExtractionConfig(**{k: v for k, v in extraction_cfg.items() if hasattr(ExtractionConfig, k)}),
     )

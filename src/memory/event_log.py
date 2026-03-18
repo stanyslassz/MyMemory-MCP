@@ -94,32 +94,3 @@ def read_events(
     return events[-limit:]
 
 
-def read_events_reverse(
-    memory_path: Path,
-    limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Read the most recent events from the log (newest first).
-
-    Args:
-        memory_path: Path to memory directory.
-        limit: Maximum number of events to return.
-
-    Returns:
-        List of event dicts, newest first.
-    """
-    log_path = memory_path / "_event_log.jsonl"
-    if not log_path.exists():
-        return []
-
-    events: list[dict[str, Any]] = []
-    with open(log_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    return list(reversed(events[-limit:]))

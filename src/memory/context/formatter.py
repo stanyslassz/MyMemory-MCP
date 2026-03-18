@@ -7,12 +7,12 @@ from pathlib import Path
 
 from src.core.config import Config
 from src.core.models import GraphData, GraphEntity
+from src.core.utils import estimate_tokens as _estimate_tokens
 from src.memory.store import read_entity, parse_observation
 from src.memory.context.utilities import (
     _deduplicate_facts_for_context,
     _sort_facts_by_date,
     _group_facts_by_category,
-    _estimate_tokens,
 )
 
 

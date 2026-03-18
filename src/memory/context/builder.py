@@ -8,8 +8,10 @@ from pathlib import Path
 from src.core.config import Config
 from src.core.models import GraphData, GraphEntity
 from src.memory.scoring import get_top_entities
-from src.memory.store import read_entity, parse_observation, _atomic_write_text
-from src.memory.context.utilities import _sort_by_cluster, _estimate_tokens
+from src.core.utils import atomic_write_text as _atomic_write_text
+from src.memory.store import read_entity
+from src.core.utils import estimate_tokens as _estimate_tokens
+from src.memory.context.utilities import _sort_by_cluster
 from src.memory.context.formatter import (
     _select_entities_for_natural,
     _classify_temporal,
@@ -226,22 +228,9 @@ def build_context(
     for eid, _ in top_entities:
         shown_ids.add(eid)
 
-    # Vigilances (compact quick-reference: entity + key content, max 2 per entity)
-    vigilance_parts = []
-    for eid, entity in all_top:
-        if eid in shown_ids and entity.type != "ai_self":
-            entity_path = (memory_path / entity.file).resolve()
-            if entity_path.exists() and entity_path.is_relative_to(memory_path.resolve()):
-                try:
-                    _, sections = read_entity(entity_path)
-                    facts = sections.get("Facts", [])
-                    vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
-                    for vf in vig_facts[:2]:  # Max 2 per entity to reduce duplication
-                        obs = parse_observation(vf)
-                        content = obs["content"] if obs else vf
-                        vigilance_parts.append(f"- {entity.title}: {content}")
-                except Exception:
-                    pass
+    # Vigilances
+    shown_entities = [(eid, e) for eid, e in all_top if eid in shown_ids and e.type != "ai_self"]
+    vigilance_parts = _extract_vigilances(shown_entities, graph, memory_path, config)
     vigilance_text = "\n".join(vigilance_parts)
 
     # Brief history — split by timeline
@@ -446,21 +435,8 @@ def build_context_with_llm(
         shown_ids.add(eid)
 
     # Vigilances — deterministic (no LLM needed for safety-critical data)
-    vigilance_parts = []
-    for eid, entity in all_top:
-        if eid in shown_ids and entity.type != "ai_self":
-            entity_path = (memory_path / entity.file).resolve()
-            if entity_path.exists() and entity_path.is_relative_to(memory_path.resolve()):
-                try:
-                    _, sections = read_entity(entity_path)
-                    facts = sections.get("Facts", [])
-                    vig_facts = [f for f in facts if "[vigilance]" in f.lower() or "[diagnosis]" in f.lower() or "[treatment]" in f.lower()]
-                    for vf in vig_facts[:2]:
-                        obs = parse_observation(vf)
-                        content = obs["content"] if obs else vf
-                        vigilance_parts.append(f"- {entity.title}: {content}")
-                except Exception:
-                    pass
+    shown_entities = [(eid, e) for eid, e in all_top if eid in shown_ids and e.type != "ai_self"]
+    vigilance_parts = _extract_vigilances(shown_entities, graph, memory_path, config)
     vigilance_text = "\n".join(vigilance_parts)
 
     # Assemble sections
@@ -497,6 +473,24 @@ def build_context_with_llm(
 
     return result
 
+
+
+def build_context_for_config(
+    graph: GraphData, memory_path: Path, config: Config,
+    *, use_llm: bool = True,
+) -> str:
+    """Dispatch to the correct context builder based on config settings.
+
+    Handles the 4-way branch: context_format (structured/natural) × context_llm_sections.
+    When use_llm=False, LLM-per-section modes are skipped (used by run-light, dream).
+    """
+    if config.context_format == "natural":
+        use_llm_sections = use_llm and config.context_llm_sections
+        return build_natural_context(graph, memory_path, config, use_llm=use_llm_sections)
+    elif use_llm and config.context_llm_sections:
+        return build_context_with_llm(graph, memory_path, config)
+    else:
+        return build_context(graph, memory_path, config)
 
 
 def write_context(memory_path: Path, content: str) -> None:

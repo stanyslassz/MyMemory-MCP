@@ -9,7 +9,8 @@ from src.core.models import (
     ConsolidatedFact, FactConsolidation,
 )
 from src.memory.store import (
-    _format_observation, _parse_observation, _is_duplicate_observation,
+    format_observation as _format_observation, parse_observation as _parse_observation,
+    _is_duplicate_observation,
     mark_observation_superseded, write_entity, read_entity,
 )
 from src.memory.context import _deduplicate_facts_for_context, _content_similarity

@@ -228,16 +228,16 @@ def extract_from_chat(chat_content: str, config: Config, memory_path: "Path | No
         existing_context = _build_extraction_context(chat_content, config, memory_path)
 
     content_tokens = _estimate_tokens(chat_content, language=config.user_language)
-    prompt_overhead = 1500
+    ext_cfg = config.extraction
     context_window = config.llm_extraction.context_window
-    threshold = int(context_window * 0.7)
+    threshold = int(context_window * ext_cfg.split_threshold)
 
-    if content_tokens + prompt_overhead < threshold:
+    if content_tokens + ext_cfg.prompt_overhead < threshold:
         return call_extraction(chat_content, config, existing_context=existing_context)
 
     # Split and extract per segment
-    segment_tokens = int(context_window * 0.5)
-    segments = _split_text(chat_content, segment_tokens, overlap_tokens=200)
+    segment_tokens = int(context_window * ext_cfg.segment_ratio)
+    segments = _split_text(chat_content, segment_tokens, overlap_tokens=ext_cfg.overlap_tokens)
 
     logger.info(
         "Content too large (%d tokens, window=%d). Splitting into %d segments.",

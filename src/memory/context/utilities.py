@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from src.core.utils import estimate_tokens as _estimate_tokens_util
 from src.memory.store import parse_observation
 
 
@@ -169,6 +168,3 @@ def _sort_by_cluster(
     return sorted(entities, key=lambda x: (cluster_first_idx.get(cluster_map.get(x[0], 0), 0), original_pos.get(x[0], 0)))
 
 
-def _estimate_tokens(text: str, language: str = "en") -> int:
-    """Rough token estimate. Delegates to shared util."""
-    return _estimate_tokens_util(text, language=language)

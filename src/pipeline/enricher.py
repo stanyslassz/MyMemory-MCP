@@ -14,7 +14,7 @@ from src.core.models import (
     ResolvedExtraction,
 )
 from src.memory.context import write_index
-from src.memory.graph import add_entity, add_relation, load_graph, remove_relation, save_graph
+from src.memory.graph import add_entity, add_relation, find_entity_by_name, load_graph, remove_relation, save_graph
 from src.memory.scoring import recalculate_all_scores
 from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, remove_relation_line, write_entity, consolidate_entity_facts
 from src.core.utils import slugify
@@ -337,17 +337,5 @@ def _create_new_entity(
 
 
 def _find_entity_slug(name: str, graph) -> str | None:
-    """Find entity slug by name or alias."""
-    slug = slugify(name)
-    if slug in graph.entities:
-        return slug
-
-    name_lower = name.lower()
-    for entity_id, meta in graph.entities.items():
-        if meta.title.lower() == name_lower:
-            return entity_id
-        for alias in meta.aliases:
-            if alias.lower() == name_lower:
-                return entity_id
-
-    return None
+    """Find entity slug by name or alias. Delegates to graph.find_entity_by_name."""
+    return find_entity_by_name(name, graph)

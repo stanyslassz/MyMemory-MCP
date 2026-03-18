@@ -7,13 +7,12 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
 from src.core.models import GraphData, GraphEntity, GraphRelation
-from src.core.utils import parse_frontmatter, slugify
+from src.core.utils import atomic_write_text, parse_frontmatter, slugify
 
 
 LOCK_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -47,7 +46,7 @@ def load_graph(memory_path: Path) -> GraphData:
             graph = GraphData.model_validate(data)
             logger.info("Restored graph from .bak")
             # Replace corrupt primary with good backup (atomic)
-            _atomic_write(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
+            atomic_write_text(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
             return graph
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             logger.warning("Corrupt _graph.json.bak: %s", exc)
@@ -61,7 +60,7 @@ def load_graph(memory_path: Path) -> GraphData:
         graph_path = memory_path / "_graph.json"
         graph.generated = datetime.now().isoformat()
         data = graph.model_dump(by_alias=True)
-        _atomic_write(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
+        atomic_write_text(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
     finally:
         _release_lock(lock_path)
     return graph
@@ -80,7 +79,7 @@ def save_graph(memory_path: Path, graph: GraphData) -> None:
 
         graph.generated = datetime.now().isoformat()
         data = graph.model_dump(by_alias=True)
-        _atomic_write(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
+        atomic_write_text(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
     finally:
         _release_lock(lock_path)
 
@@ -88,16 +87,6 @@ def save_graph(memory_path: Path, graph: GraphData) -> None:
 def add_entity(graph: GraphData, entity_id: str, entity: GraphEntity) -> GraphData:
     """Add or replace an entity in the graph."""
     graph.entities[entity_id] = entity
-    return graph
-
-
-def update_entity(graph: GraphData, entity_id: str, **updates) -> GraphData:
-    """Update specific fields of an entity."""
-    if entity_id in graph.entities:
-        entity = graph.entities[entity_id]
-        for key, value in updates.items():
-            if hasattr(entity, key):
-                setattr(entity, key, value)
     return graph
 
 
@@ -182,6 +171,21 @@ def get_aliases_lookup(graph: GraphData) -> dict[str, str]:
     return lookup
 
 
+def find_entity_by_name(name: str, graph: GraphData) -> str | None:
+    """Resolve entity name to entity_id via slug, title, or alias match."""
+    slug = slugify(name)
+    if slug in graph.entities:
+        return slug
+    name_lower = name.lower()
+    for eid, e in graph.entities.items():
+        if e.title.lower() == name_lower:
+            return eid
+    for eid, e in graph.entities.items():
+        if any(a.lower() == name_lower for a in (e.aliases or [])):
+            return eid
+    return None
+
+
 def validate_graph(graph: GraphData, memory_path: Path) -> list[str]:
     """Validate graph consistency. Returns list of warnings."""
     warnings = []
@@ -215,7 +219,7 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
 
         try:
             text = md_file.read_text(encoding="utf-8")
-            fm_data, body = _parse_frontmatter_raw(text)
+            fm_data, body = parse_frontmatter(text)
             if "title" not in fm_data or "type" not in fm_data:
                 continue
 
@@ -250,25 +254,6 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
 
 # ── Private helpers ──────────────────────────────────────────
 
-def _atomic_write(filepath: Path, content: str) -> None:
-    """Write content to file atomically via temp file + os.replace."""
-    fd, tmp = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
-    try:
-        os.write(fd, content.encode("utf-8"))
-        os.close(fd)
-        os.replace(tmp, filepath)
-    except BaseException:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
 def _acquire_lock(lock_path: Path) -> None:
     """Acquire lockfile atomically. Delete stale locks (>5 min)."""
     if lock_path.exists():
@@ -299,9 +284,6 @@ def _release_lock(lock_path: Path) -> None:
         pass
 
 
-def _parse_frontmatter_raw(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from markdown text. Delegates to shared util."""
-    return parse_frontmatter(text)
 
 
 def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) -> None:
@@ -319,7 +301,7 @@ def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) ->
             if match:
                 rel_type = match.group(1)
                 target_title = match.group(2)
-                target_slug = _slugify(target_title)
+                target_slug = slugify(target_title)
                 try:
                     rel = GraphRelation(from_entity=entity_slug, to_entity=target_slug, type=rel_type)
                     add_relation(graph, rel)
@@ -358,6 +340,3 @@ def compute_negative_valence_ratio(body: str) -> float:
     return round(negative_count / total, 4)
 
 
-def _slugify(text: str) -> str:
-    """Convert a title to a slug (lowercase, hyphens). Delegates to shared util."""
-    return slugify(text)
