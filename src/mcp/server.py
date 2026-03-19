@@ -486,6 +486,38 @@ def correct_entity(entity_name: str, field: str, new_value: str) -> str:
     return _correct_entity_impl(entity_name, field, new_value, config)
 
 
+@mcp.tool()
+def suggest_correction(entity_name: str, issue: str, suggested_fix: str) -> str:
+    """Flag a potential memory inconsistency for user review.
+
+    USE THIS WHEN:
+    - You detect something that MIGHT be wrong but you're not sure
+    - The user mentions something that conflicts with stored memory but it could be a misunderstanding
+    - You want to flag a possible correction without making the change immediately
+
+    DO NOT USE WHEN:
+    - You are confident the correction is needed — use modify_fact or correct_entity directly
+    - The user explicitly asks to change something — just do it with the appropriate tool
+
+    Args:
+        entity_name: The entity that might need correction.
+        issue: What seems inconsistent (e.g., "memory says works at Acme but user mentioned new company").
+        suggested_fix: What you think should change (e.g., "update workplace to NewCorp").
+
+    Returns:
+        JSON string with 'status' ('logged') confirming the suggestion was recorded.
+        The suggestion will appear in the next context rebuild under 'Pending Corrections'.
+    """
+    config = _get_config()
+    from src.memory.event_log import append_event
+    append_event(config.memory_path, "correction_suggested", "mcp", {
+        "entity": entity_name,
+        "issue": issue,
+        "suggested_fix": suggested_fix,
+    })
+    return json.dumps({"status": "logged", "message": f"Suggestion logged for '{entity_name}'"})
+
+
 def run_server(config=None, transport_override: str | None = None):
     """Start the MCP server.
 

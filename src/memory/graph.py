@@ -99,8 +99,17 @@ def add_relation(graph: GraphData, relation: GraphRelation, *, strength_growth: 
             # Reinforce existing relation
             existing.mention_count += 1
             existing.last_reinforced = datetime.now().isoformat()
-            # Hebbian: strength grows with co-activation, capped at 1.0
-            existing.strength = min(1.0, existing.strength + strength_growth)
+            # Multiplicative Hebbian: delta ∝ margin × activity
+            # - (1 - strength) provides soft saturation: high strength → small delta
+            # - activity_factor: mean score of both entities — active pairs reinforce more
+            # - max(0.2, ...) ensures minimum reinforcement even for low-score entities
+            from_ent = graph.entities.get(relation.from_entity)
+            to_ent = graph.entities.get(relation.to_entity)
+            from_activity = from_ent.score if from_ent else 0.5
+            to_activity = to_ent.score if to_ent else 0.5
+            activity_factor = max(0.2, (from_activity + to_activity) / 2)
+            delta = strength_growth * (1.0 - existing.strength) * activity_factor
+            existing.strength = round(min(1.0, existing.strength + delta), 4)
             if relation.context and not existing.context:
                 existing.context = relation.context
             graph.invalidate_adjacency()

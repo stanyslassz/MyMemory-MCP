@@ -648,6 +648,88 @@ def actions(ctx, last, entity, action_type):
 @cli.command()
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
 @click.pass_context
+def health(ctx, fmt):
+    """Analyze memory health and show recommendations."""
+    import json as json_mod
+    from src.memory.insights import analyze_memory_health
+    from src.memory.graph import load_graph
+
+    config = ctx.obj["config"]
+    graph = load_graph(config.memory_path)
+    result = analyze_memory_health(graph, config)
+
+    if fmt == "json":
+        click.echo(json_mod.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    console.print(f"\n[bold]Memory Health Report[/bold]\n")
+    console.print(f"[dim]{result['summary']}[/dim]\n")
+
+    # Hot topics
+    if result["hot_topics"]:
+        table = Table(title="Hot Topics (3+ mentions in 7 days)", title_style="bold red")
+        table.add_column("Entity", style="cyan")
+        table.add_column("Mentions (7d)", justify="right", style="red")
+        for item in result["hot_topics"]:
+            table.add_row(item["title"], str(item["mentions_7d"]))
+        console.print(table)
+        console.print()
+
+    # Stale topics
+    if result["stale_topics"]:
+        table = Table(title="Stale Topics (60+ days without mention)", title_style="bold yellow")
+        table.add_column("Entity", style="cyan")
+        table.add_column("Days Since", justify="right", style="yellow")
+        for item in result["stale_topics"][:20]:
+            table.add_row(item["title"], str(item["days_since"]))
+        if len(result["stale_topics"]) > 20:
+            console.print(f"  [dim]... and {len(result['stale_topics']) - 20} more[/dim]")
+        console.print(table)
+        console.print()
+
+    # Orphans
+    if result["orphans"]:
+        table = Table(title="Orphans (no relations)", title_style="bold blue")
+        table.add_column("Entity", style="cyan")
+        for item in result["orphans"][:20]:
+            table.add_row(item["title"])
+        if len(result["orphans"]) > 20:
+            console.print(f"  [dim]... and {len(result['orphans']) - 20} more[/dim]")
+        console.print(table)
+        console.print()
+
+    # Overloaded
+    if result["overloaded"]:
+        table = Table(title="Overloaded Entities (nearing max facts)", title_style="bold magenta")
+        table.add_column("Entity", style="cyan")
+        table.add_column("Frequency", justify="right")
+        table.add_column("Max Facts", justify="right")
+        for item in result["overloaded"]:
+            table.add_row(item["title"], str(item["frequency"]), str(item["max_facts"]))
+        console.print(table)
+        console.print()
+
+    # Recommendations
+    recs = []
+    if len(result["overloaded"]) > 3:
+        recs.append("Run [bold]memory dream[/bold] or [bold]memory consolidate --facts[/bold] to consolidate overloaded entities")
+    if len(result["orphans"]) > 5:
+        recs.append("Run [bold]memory relations[/bold] or [bold]memory dream[/bold] to discover relations for orphans")
+    if len(result["stale_topics"]) > 10:
+        recs.append("Run [bold]memory dream[/bold] to prune stale entities")
+    if recs:
+        console.print("[bold]Recommendations:[/bold]")
+        for r in recs:
+            console.print(f"  - {r}")
+        console.print()
+
+    if not any([result["hot_topics"], result["stale_topics"], result["orphans"], result["overloaded"]]):
+        console.print("[green]Memory is healthy — no issues detected.[/green]")
+
+
+@cli.command()
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.pass_context
 def insights(ctx, fmt):
     """Show ACT-R cognitive insights about memory state."""
     import json as json_mod

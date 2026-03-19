@@ -50,7 +50,7 @@ def _clear_checkpoint(memory_path: Path) -> None:
         path.unlink()
 
 
-def _generate_dream_report(memory_path: Path, dream_id: str, session_start_ts: str) -> Path:
+def _generate_dream_report(memory_path: Path, dream_id: str, session_start_ts: str, *, health: dict | None = None) -> Path:
     """Generate a markdown report from dream session events."""
     from src.memory.event_log import read_events
 
@@ -113,6 +113,32 @@ def _generate_dream_report(memory_path: Path, dream_id: str, session_start_ts: s
         lines.append("")
         lines.extend(details_sections)
 
+    if health:
+        lines.append("")
+        lines.append("## Memory Health")
+        lines.append("")
+        lines.append(f"**Summary**: {health.get('summary', 'N/A')}")
+        if health.get("hot_topics"):
+            lines.append("")
+            lines.append("**Hot topics** (3+ mentions in 7 days):")
+            for h in health["hot_topics"][:10]:
+                lines.append(f"- {h['title']} ({h['mentions_7d']} mentions)")
+        if health.get("stale_topics"):
+            lines.append("")
+            lines.append(f"**Stale topics** ({len(health['stale_topics'])} entities, 60+ days):")
+            for h in health["stale_topics"][:10]:
+                lines.append(f"- {h['title']} ({h['days_since']}d)")
+        if health.get("orphans"):
+            lines.append("")
+            lines.append(f"**Orphans** ({len(health['orphans'])} entities, no relations):")
+            for h in health["orphans"][:10]:
+                lines.append(f"- {h['title']}")
+        if health.get("overloaded"):
+            lines.append("")
+            lines.append(f"**Overloaded** ({len(health['overloaded'])} entities):")
+            for h in health["overloaded"][:10]:
+                lines.append(f"- {h['title']} (freq {h['frequency']}/{h['max_facts']})")
+
     lines.append("")
 
     report_path = memory_path / "_dream_report.md"
@@ -120,8 +146,13 @@ def _generate_dream_report(memory_path: Path, dream_id: str, session_start_ts: s
     return report_path
 
 
-def decide_dream_steps(stats: dict) -> list[int]:
-    """Deterministic dream step selection. Replaces LLM coordinator."""
+def decide_dream_steps(stats: dict, health: dict | None = None) -> list[int]:
+    """Deterministic dream step selection. Replaces LLM coordinator.
+
+    If *health* (output of ``analyze_memory_health``) is provided, its
+    findings can promote additional steps that the base stats alone would
+    not have triggered.
+    """
     steps = [1]  # Load always
     if stats.get("unextracted_docs", 0) > 0:
         steps.append(2)
@@ -137,6 +168,16 @@ def decide_dream_steps(stats: dict) -> list[int]:
         steps.append(7)
     if stats.get("summary_candidates", 0) >= 3:
         steps.append(8)
+
+    # Health-based promotions
+    if health:
+        if len(health.get("overloaded", [])) > 3 and 3 not in steps:
+            steps.append(3)
+        if len(health.get("orphans", [])) > 5 and 5 not in steps:
+            steps.append(5)
+        if len(health.get("stale_topics", [])) > 10 and 7 not in steps:
+            steps.append(7)
+
     if any(s in steps for s in [2, 3, 4, 5, 6, 7, 8]):
         steps.extend([9, 10])
     return sorted(set(steps))
@@ -201,11 +242,14 @@ def run_dream(
     elif step is not None:
         steps_to_run = [step]
     else:
-        # Deterministic step selection based on stats
+        # Deterministic step selection based on stats + health analysis
         stats_text, counts = _collect_dream_stats(graph, entity_paths, config)
-        steps_to_run = decide_dream_steps(counts)
-        logger.info("Dream plan (deterministic): steps=%s, stats=%s", steps_to_run, counts)
+        from src.memory.insights import analyze_memory_health
+        health = analyze_memory_health(graph, config)
+        steps_to_run = decide_dream_steps(counts, health=health)
+        logger.info("Dream plan (deterministic): steps=%s, stats=%s, health=%s", steps_to_run, counts, health["summary"])
         console.print(f"[dim]Coordinator plan (deterministic): steps {steps_to_run}[/dim]")
+        console.print(f"[dim]Health: {health['summary']}[/dim]")
 
     # Always include step 1 (load)
     if 1 not in steps_to_run:
@@ -440,7 +484,10 @@ def run_dream(
 
     # Generate report (even in dry_run -- events were logged regardless)
     try:
-        _generate_dream_report(memory_path, dream_id, session_start_ts)
+        # Compute health for inclusion in report
+        from src.memory.insights import analyze_memory_health as _health_fn
+        health_for_report = _health_fn(graph, config)
+        _generate_dream_report(memory_path, dream_id, session_start_ts, health=health_for_report)
     except Exception as e:
         logger.warning("Dream report generation failed: %s", e)
 

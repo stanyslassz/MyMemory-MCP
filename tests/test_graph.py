@@ -199,7 +199,7 @@ def test_add_relation_reinforces_existing():
     add_relation(graph, rel2)
     assert len(graph.relations) == 1  # Still 1, not duplicated
     assert graph.relations[0].mention_count == 2  # Reinforced
-    assert graph.relations[0].strength == 0.55  # Hebbian: 0.5 + 0.05
+    assert graph.relations[0].strength == 0.505  # Multiplicative Hebbian: 0.05 * 0.5 * 0.2
     assert graph.relations[0].context == "new context"
     assert graph.relations[0].last_reinforced != ""
 
@@ -219,7 +219,7 @@ def test_hebbian_strength_grows_with_mentions():
         add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"))
 
     assert graph.relations[0].mention_count == 11
-    assert graph.relations[0].strength > 0.7  # 0.5 + 10 * 0.05 = 1.0
+    assert graph.relations[0].strength > 0.54  # Multiplicative: grows slower with soft saturation
     assert graph.relations[0].strength <= 1.0  # Capped
 
 
@@ -233,7 +233,7 @@ def test_hebbian_custom_growth_rate():
     add_relation(graph, GraphRelation(from_entity="a", to_entity="b", type="affects"),
                  strength_growth=0.1)
 
-    assert graph.relations[0].strength == 0.6  # 0.5 + 0.1
+    assert graph.relations[0].strength == 0.51  # Multiplicative: 0.1 * 0.5 * 0.2 = 0.01
 
 
 def test_remove_relation():

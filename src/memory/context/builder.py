@@ -27,6 +27,20 @@ from src.memory.context.formatter import (
 logger = logging.getLogger(__name__)
 
 
+def _build_pending_corrections(memory_path: Path) -> str:
+    """Build pending corrections section from event log."""
+    from src.memory.event_log import read_events
+    events = read_events(memory_path, event_type="correction_suggested")
+    if not events:
+        return ""
+    recent = events[-5:]  # 5 most recent
+    lines = ["\n## Pending Corrections (verify with user)"]
+    for evt in recent:
+        d = evt.get("data", {})
+        lines.append(f"- **{d.get('entity', '?')}**: {d.get('issue', '?')} → {d.get('suggested_fix', '?')}")
+    return "\n".join(lines)
+
+
 def _make_section_budget_fn(config: Config) -> tuple[int, dict, callable]:
     """Create a section budget calculator from config. Returns (total_budget, budget_dict, fn)."""
     reserved = config.ctx.reserved_tokens_structured
@@ -170,6 +184,11 @@ def build_natural_context(
     result = result.replace("{extended_memory}", extended)
     result = result.replace("{custom_instructions}", custom_instructions)
 
+    # Append pending corrections if any
+    pending = _build_pending_corrections(memory_path)
+    if pending:
+        result += pending
+
     return result
 
 
@@ -295,6 +314,11 @@ def build_context(
     result = result.replace("{sections}", sections_text)
     result = result.replace("{available_entities}", available_text)
     result = result.replace("{custom_instructions}", custom_instructions)
+
+    # Append pending corrections if any
+    pending = _build_pending_corrections(memory_path)
+    if pending:
+        result += pending
 
     return result
 
@@ -472,6 +496,11 @@ def build_context_with_llm(
     result = result.replace("{sections}", sections_text)
     result = result.replace("{available_entities}", available_text)
     result = result.replace("{custom_instructions}", custom_instructions)
+
+    # Append pending corrections if any
+    pending = _build_pending_corrections(memory_path)
+    if pending:
+        result += pending
 
     return result
 

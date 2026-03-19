@@ -1,5 +1,7 @@
 """ACT-R cognitive insights from graph data."""
 
+from __future__ import annotations
+
 from datetime import date
 
 from src.core.models import GraphData
@@ -87,3 +89,78 @@ def compute_insights(graph: GraphData, today_str: str = None) -> dict:
         })
 
     return insights
+
+
+def analyze_memory_health(
+    graph: GraphData,
+    config,  # Config
+    today_str: str | None = None,
+) -> dict:
+    """Analyze memory health: hot topics, stale topics, orphans, overloaded entities."""
+    today = date.fromisoformat(today_str) if today_str else date.today()
+
+    hot_topics: list[dict] = []
+    stale_topics: list[dict] = []
+    overloaded: list[dict] = []
+
+    for eid, entity in graph.entities.items():
+        # Hot topics: mentioned 3+ times in last 7 days
+        mentions_7d = 0
+        for md in entity.mention_dates or []:
+            try:
+                d = date.fromisoformat(str(md))
+                if (today - d).days <= 7:
+                    mentions_7d += 1
+            except (ValueError, TypeError):
+                continue
+        if mentions_7d >= 3:
+            hot_topics.append({"id": eid, "title": entity.title, "mentions_7d": mentions_7d})
+
+        # Stale topics: not mentioned in 60+ days, not permanent
+        if entity.retention != "permanent":
+            last = entity.last_mentioned or entity.created
+            if last:
+                try:
+                    days_since = (today - date.fromisoformat(str(last))).days
+                    if days_since >= 60:
+                        stale_topics.append({"id": eid, "title": entity.title, "days_since": days_since})
+                except (ValueError, TypeError):
+                    pass
+
+        # Overloaded: frequency >= 0.8 * max_facts for entity type
+        max_f = config.get_max_facts(entity.type)
+        if entity.frequency >= 0.8 * max_f:
+            overloaded.append({
+                "id": eid, "title": entity.title,
+                "frequency": entity.frequency, "max_facts": max_f,
+            })
+
+    # Orphans: entities with 0 relations
+    related = set()
+    for r in graph.relations:
+        related.add(r.from_entity)
+        related.add(r.to_entity)
+    orphans = [
+        {"id": eid, "title": entity.title}
+        for eid, entity in graph.entities.items()
+        if eid not in related
+    ]
+
+    # Sort for determinism
+    hot_topics.sort(key=lambda x: x["mentions_7d"], reverse=True)
+    stale_topics.sort(key=lambda x: x["days_since"], reverse=True)
+    orphans.sort(key=lambda x: x["id"])
+    overloaded.sort(key=lambda x: x["frequency"], reverse=True)
+
+    summary = (
+        f"{len(hot_topics)} hot, {len(stale_topics)} stale, "
+        f"{len(orphans)} orphan, {len(overloaded)} overloaded entities"
+    )
+
+    return {
+        "hot_topics": hot_topics,
+        "stale_topics": stale_topics,
+        "orphans": orphans,
+        "overloaded": overloaded,
+        "summary": summary,
+    }
