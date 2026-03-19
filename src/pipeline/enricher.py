@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from src.memory.context import write_index
 from src.memory.graph import add_entity, add_relation, find_entity_by_name, load_graph, remove_relation, save_graph
 from src.memory.scoring import recalculate_all_scores
 from src.memory.store import create_entity, create_stub_entity, update_entity, mark_observation_superseded, read_entity, remove_relation_line, write_entity, consolidate_entity_facts
-from src.core.utils import slugify
+from src.core.utils import filter_live_facts, slugify
+
+logger = logging.getLogger(__name__)
 
 
 # Families of mutually exclusive relation types between the same entity pair.
@@ -187,9 +190,6 @@ def _update_existing_entity(
     config: Config | None = None,
 ) -> None:
     """Update an existing entity with new observations."""
-    import logging
-    _logger = logging.getLogger(__name__)
-
     if entity_id not in graph.entities:
         return
 
@@ -217,16 +217,16 @@ def _update_existing_entity(
     if config is not None:
         max_facts = config.get_max_facts(entity_meta.type)
         _, sections = read_entity(filepath)
-        live_facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+        live_facts = filter_live_facts(sections.get("Facts", []))
         if len(live_facts) + len(raw_entity.observations) > max_facts:
-            _logger.info(
+            logger.info(
                 "Pre-consolidating %s (%d + %d > %d facts)",
                 entity_meta.title, len(live_facts), len(raw_entity.observations), max_facts,
             )
             try:
                 consolidate_entity_facts(filepath, config, max_facts=max_facts)
             except Exception as e:
-                _logger.warning("Pre-consolidation failed for %s: %s", entity_id, e)
+                logger.warning("Pre-consolidation failed for %s: %s", entity_id, e)
 
     # Prepare observations
     new_obs = [

@@ -324,12 +324,19 @@ def _bump_mentions(
     rate_limit: bool,
     query: str = "",
 ) -> None:
-    """L2→L1 re-emergence: bump mention_dates for retrieved entities."""
+    """L2→L1 re-emergence: bump mention_dates for retrieved entities.
+
+    Uses a configurable cooldown (mention_bump_cooldown_days) to attenuate
+    the positive feedback loop from frequent searches.
+    """
     from src.memory.mentions import add_mention
     from src.memory.graph import save_graph
     from src.memory.event_log import append_event
+    from datetime import timedelta
 
-    today = date.today().isoformat()
+    today = date.today()
+    today_str = today.isoformat()
+    cooldown_days = config.search.mention_bump_cooldown_days
     promoted = False
 
     for result in results:
@@ -338,14 +345,22 @@ def _bump_mentions(
             continue
         entity = graph.entities[entity_id]
 
-        if rate_limit and today in entity.mention_dates:
-            continue
+        # Cooldown: skip if entity was already bumped within cooldown window
+        if rate_limit and entity.mention_dates:
+            last_mention = entity.mention_dates[-1] if entity.mention_dates else None
+            if last_mention:
+                try:
+                    last_date = date.fromisoformat(last_mention)
+                    if (today - last_date).days < cooldown_days:
+                        continue
+                except (ValueError, TypeError):
+                    pass
 
         entity.mention_dates, entity.monthly_buckets = add_mention(
-            today, entity.mention_dates, entity.monthly_buckets,
+            today_str, entity.mention_dates, entity.monthly_buckets,
             window_size=config.scoring.window_size,
         )
-        entity.last_mentioned = today
+        entity.last_mentioned = today_str
         promoted = True
 
     if promoted:
@@ -355,6 +370,6 @@ def _bump_mentions(
             logger.warning("Could not save graph after L2→L1 bump (locked)")
 
         try:
-            append_event(memory_path, "search_performed", "rag", {"query": query[:100]})
+            append_event(memory_path, "search_performed", "rag", {"query": query[:100], "cooldown_days": cooldown_days})
         except Exception:
             pass

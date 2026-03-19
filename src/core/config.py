@@ -112,6 +112,7 @@ class SearchConfig:
     resolver_threshold: float = 0.75
     linear_faiss_weight: float = 0.6
     linear_actr_weight: float = 0.4
+    mention_bump_cooldown_days: int = 3
 
 
 @dataclass
@@ -124,7 +125,7 @@ class DreamConfig:
     prune_max_frequency: int = 1
     transitive_min_strength: float = 0.4
     transitive_max_new: int = 20
-    dedup_confidence_threshold: float = 0.7
+    dedup_confidence_threshold: float = 0.85
 
 
 @dataclass
@@ -379,6 +380,7 @@ def load_config(config_path: str | Path | None = None, project_root: Path | None
             resolver_threshold=search_cfg.get("resolver_threshold", 0.75),
             linear_faiss_weight=search_cfg.get("linear_faiss_weight", 0.6),
             linear_actr_weight=search_cfg.get("linear_actr_weight", 0.4),
+            mention_bump_cooldown_days=search_cfg.get("mention_bump_cooldown_days", 3),
         ),
         dream=DreamConfig(**{k: v for k, v in raw.get("dream", {}).items() if hasattr(DreamConfig, k)}),
         fact_ttl=FactTTLConfig(**{k: v for k, v in ttl_cfg.items() if hasattr(FactTTLConfig, k)}),

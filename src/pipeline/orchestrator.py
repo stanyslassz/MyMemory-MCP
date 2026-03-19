@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-logger = logging.getLogger("memory-ai")
+from src.core.utils import filter_live_facts
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
@@ -152,7 +154,7 @@ def auto_consolidate(memory_path, config, console, min_facts: int = 8) -> None:
             max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
-            live_facts = [f for f in facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(facts)
             if len(live_facts) > max_facts:
                 console.print(f"  [cyan]Auto-consolidating {entity.title} ({len(live_facts)} facts, max {max_facts})...[/cyan]")
                 result = consolidate_entity_facts(entity_path, config, max_facts=max_facts)
@@ -188,7 +190,7 @@ def consolidate_facts(config, console, dry_run: bool, min_facts: int) -> None:
             max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
-            live_facts = [f for f in facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(facts)
             # Use the stricter of min_facts CLI arg or max_facts config
             threshold = min(min_facts, max_facts)
             if len(live_facts) >= threshold:

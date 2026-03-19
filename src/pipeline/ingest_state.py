@@ -74,7 +74,7 @@ def mark_replayed(chat_path: str, success: bool, config: Config, error: str | No
             entry["last_attempt"] = datetime.now().isoformat()
             if success:
                 entry["status"] = "succeeded"
-            elif entry["attempts"] >= 3:
+            elif entry["attempts"] >= config.ingest.max_retries:
                 entry["status"] = "exhausted"
                 entry["error"] = error or entry.get("error", "")
             else:

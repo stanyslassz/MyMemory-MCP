@@ -72,11 +72,17 @@ def ingest_document(
     if index_path.exists() and mapping_path.exists():
         index = faiss.read_index(str(index_path))
         with open(mapping_path, "rb") as f:
-            chunk_mapping = pickle.load(f)
+            raw_mapping = pickle.load(f)
+        # Normalize: dict (new format) or list (legacy)
+        if isinstance(raw_mapping, list):
+            chunk_mapping: dict[int, dict] = {i: cm for i, cm in enumerate(raw_mapping)}
+        else:
+            chunk_mapping = raw_mapping
     else:
         dim = embeddings.shape[1]
-        index = faiss.IndexFlatIP(dim)
-        chunk_mapping = []
+        base_index = faiss.IndexFlatIP(dim)
+        index = faiss.IndexIDMap(base_index)
+        chunk_mapping = {}
 
     # Upsert guard: remove old vectors for same source if re-ingesting
     doc_key = f"_doc/{source_id}"
@@ -86,17 +92,25 @@ def ingest_document(
         logger.info("Document %s already indexed with same hash, skipping", source_id)
         return {"chunks_indexed": 0, "source_id": source_id, "skipped": True}
 
-    # Add new vectors
-    start_idx = index.ntotal
-    index.add(embeddings.astype(np.float32))
+    # Add new vectors with explicit IDs
+    next_id = manifest.get("next_id", max(chunk_mapping.keys(), default=-1) + 1 if chunk_mapping else index.ntotal)
+    new_ids = []
 
     for i, chunk in enumerate(chunks):
-        chunk_mapping.append({
+        chunk_id = next_id + i
+        new_ids.append(chunk_id)
+        chunk_mapping[chunk_id] = {
             "file": doc_key,
             "entity_id": f"doc:{source_id}",
             "chunk_idx": i,
             "chunk_text": chunk[:200],  # store preview for search results
-        })
+        }
+
+    if hasattr(index, "add_with_ids"):
+        ids_array = np.array(new_ids, dtype=np.int64)
+        index.add_with_ids(embeddings.astype(np.float32), ids_array)
+    else:
+        index.add(embeddings.astype(np.float32))
 
     # Update manifest
     if "indexed_files" not in manifest:
@@ -105,11 +119,12 @@ def ingest_document(
         "hash": ingest_key.content_hash,
         "content_hash": ingest_key.content_hash,
         "chunks": len(chunks),
-        "ids": list(range(start_idx, start_idx + len(chunks))),
+        "ids": new_ids,
         "source_type": "document",
         "chunk_policy_version": ingest_key.chunk_policy_version,
     }
     manifest["embedding_model"] = f"{config.embeddings.provider}/{config.embeddings.model}"
+    manifest["next_id"] = next_id + len(chunks)
 
     # Save
     index_path.parent.mkdir(parents=True, exist_ok=True)

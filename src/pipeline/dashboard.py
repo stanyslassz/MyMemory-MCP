@@ -8,12 +8,12 @@ Uses the same vis-network.js + Barnes-Hut physics as visualize.py for the graph 
 from __future__ import annotations
 
 import json
-import webbrowser
 from pathlib import Path
 
 from src.core.config import Config
 from src.core.models import DEFAULT_TYPE_COLOR as _DEFAULT_COLOR, TYPE_COLORS, GraphData
 from src.memory.graph import load_graph
+from src.core.utils import filter_live_facts
 from src.memory.store import read_entity
 
 
@@ -56,13 +56,6 @@ def generate_dashboard(config: Config) -> Path:
     return output
 
 
-def open_dashboard(config: Config) -> Path:
-    """Generate dashboard HTML and open in default browser."""
-    output = generate_dashboard(config)
-    webbrowser.open(f"file://{output.resolve()}")
-    return output
-
-
 # ---------------------------------------------------------------------------
 # Data loaders
 # ---------------------------------------------------------------------------
@@ -91,7 +84,7 @@ def _load_entity_details(graph: GraphData, memory_path: Path) -> dict:
             continue
         try:
             _fm, sections = read_entity(entity_path)
-            raw_facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+            raw_facts = filter_live_facts(sections.get("Facts", []))
             details[eid] = {
                 "title": entity.title,
                 "type": entity.type,

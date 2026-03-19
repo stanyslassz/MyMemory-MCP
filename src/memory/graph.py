@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.core.models import GraphData, GraphEntity, GraphRelation
-from src.core.utils import atomic_write_text, parse_frontmatter, slugify
+from src.core.utils import atomic_write_text, is_entity_file, parse_frontmatter, slugify
 
 
 LOCK_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -212,9 +212,7 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
 
     for md_file in sorted(memory_path.rglob("*.md")):
         rel = md_file.relative_to(memory_path)
-        parts = rel.parts
-        # Skip _ prefixed, chats/, etc.
-        if any(p.startswith("_") for p in parts) or (parts and parts[0] == "chats"):
+        if not is_entity_file(rel.parts):
             continue
 
         try:

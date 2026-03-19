@@ -292,20 +292,22 @@ def call_arbitration(
     return _call_structured(config.llm_arbitration, prompt, EntityResolution)
 
 
-def call_context_section(
+def _call_context_section_generic(
+    prompt_name: str,
     section_name: str,
     entities_dossier: str,
     rag_context: str,
+    rag_fallback: str,
     budget_tokens: int,
     config: Config,
 ) -> str:
-    """Generate a clean context section via LLM. Returns free-text markdown."""
+    """Generate a context section via LLM. Shared logic for structured/natural modes."""
     prompt = load_prompt(
-        "context_section",
+        prompt_name,
         config,
         section_name=section_name,
         entities_dossier=entities_dossier,
-        rag_context=rag_context or "No additional context available.",
+        rag_context=rag_context or rag_fallback,
         budget_tokens=str(budget_tokens),
     )
 
@@ -323,6 +325,20 @@ def call_context_section(
     response = litellm.completion(**kwargs)
     text = response.choices[0].message.content or ""
     return strip_thinking(text).strip()
+
+
+def call_context_section(
+    section_name: str,
+    entities_dossier: str,
+    rag_context: str,
+    budget_tokens: int,
+    config: Config,
+) -> str:
+    """Generate a clean context section via LLM. Returns free-text markdown."""
+    return _call_context_section_generic(
+        "context_section", section_name, entities_dossier, rag_context,
+        "No additional context available.", budget_tokens, config,
+    )
 
 
 def call_natural_context_section(
@@ -333,29 +349,10 @@ def call_natural_context_section(
     config: Config,
 ) -> str:
     """Generate natural narrative bullets for a context section."""
-    prompt = load_prompt(
-        "context_natural_section",
-        config,
-        section_name=section_name,
-        entities_dossier=entities_dossier,
-        rag_context=rag_context or "Pas de contexte supplémentaire.",
-        budget_tokens=str(budget_tokens),
+    return _call_context_section_generic(
+        "context_natural_section", section_name, entities_dossier, rag_context,
+        "Pas de contexte supplémentaire.", budget_tokens, config,
     )
-
-    step_config = config.llm_context
-    kwargs: dict[str, Any] = {
-        "model": step_config.model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": step_config.temperature,
-    }
-    if step_config.timeout:
-        kwargs["timeout"] = step_config.timeout
-    if step_config.api_base:
-        kwargs["api_base"] = step_config.api_base
-
-    response = litellm.completion(**kwargs)
-    text = response.choices[0].message.content or ""
-    return strip_thinking(text).strip()
 
 
 def call_fact_consolidation(

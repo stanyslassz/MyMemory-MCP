@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
 import click
@@ -20,7 +19,7 @@ from src.pipeline.orchestrator import (
 )
 
 console = Console()
-logger = logging.getLogger("memory-ai")
+logger = logging.getLogger(__name__)
 
 
 def _setup_logging(verbose: bool = False):

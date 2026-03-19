@@ -7,6 +7,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.core.utils import is_entity_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,12 +36,8 @@ def build_keyword_index(memory_path: Path, db_path: Path, *, chunk_size: int = 3
 
     count = 0
     for md_file in sorted(memory_path.rglob("*.md")):
-        if md_file.name.startswith("_"):
-            continue
         rel = md_file.relative_to(memory_path)
-        parts = rel.parts
-        # Skip chats, _-prefixed dirs (same filter as FAISS indexer)
-        if any(p.startswith("_") for p in parts) or (parts and parts[0] == "chats"):
+        if not is_entity_file(rel.parts):
             continue
 
         entity_id = md_file.stem

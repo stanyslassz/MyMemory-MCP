@@ -7,10 +7,10 @@ legend, Barnes-Hut solver for large graphs, double-click focus.
 from __future__ import annotations
 
 import json
-import webbrowser
 from pathlib import Path
 
 from src.core.models import DEFAULT_TYPE_COLOR as _DEFAULT_COLOR, TYPE_COLORS as _TYPE_COLORS, GraphData
+from src.core.utils import filter_live_facts
 
 
 def generate_graph_html(graph: GraphData, output_path: Path, memory_path: Path | None = None) -> Path:
@@ -32,7 +32,7 @@ def generate_graph_html(graph: GraphData, output_path: Path, memory_path: Path |
             if entity_path.exists():
                 try:
                     _, sections = read_entity_fn(entity_path)
-                    raw_facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+                    raw_facts = filter_live_facts(sections.get("Facts", []))
                     facts = raw_facts[:5]
                 except Exception:
                     pass
@@ -348,9 +348,3 @@ network.on("doubleClick", function(params) {{
     return output_path
 
 
-def open_graph(graph: GraphData, memory_path: Path) -> Path:
-    """Generate graph HTML and open in default browser."""
-    output = memory_path / "_graph.html"
-    generate_graph_html(graph, output, memory_path=memory_path)
-    webbrowser.open(f"file://{output.resolve()}")
-    return output

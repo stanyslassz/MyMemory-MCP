@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 from src.core.models import EntityFrontmatter
-from src.core.utils import atomic_write_text as _atomic_write_text, parse_frontmatter as _shared_parse_frontmatter
+from src.core.utils import atomic_write_text as _atomic_write_text, filter_live_facts, is_entity_file, parse_frontmatter as _shared_parse_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def update_entity(
                 existing_facts.append(line)
         # Hard cap safety net: if way over limit, keep most recent
         if max_facts:
-            live_facts = [f for f in existing_facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(existing_facts)
             if len(live_facts) > max_facts * 2:
                 logger.warning(
                     "Entity %s has %d facts (cap %d), truncating to %d most recent",
@@ -185,9 +185,7 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
     results = []
     for md_file in sorted(base_path.rglob("*.md")):
         rel = md_file.relative_to(base_path)
-        parts = rel.parts
-        # Skip _ prefixed dirs/files and chats/
-        if any(p.startswith("_") for p in parts) or (parts and parts[0] == "chats"):
+        if not is_entity_file(rel.parts):
             continue
         try:
             fm, _ = read_entity(md_file)
@@ -227,7 +225,7 @@ def consolidate_entity_facts(
         return {"original_count": 0, "consolidated_count": 0, "changes": []}
 
     # Filter out already superseded facts — only consolidate live ones
-    live_facts = [f for f in facts if "[superseded]" not in f]
+    live_facts = filter_live_facts(facts)
     superseded_facts = [f for f in facts if "[superseded]" in f]
 
     if len(live_facts) < 3:
@@ -362,22 +360,28 @@ def list_unprocessed_chats(memory_path: Path) -> list[Path]:
     return unprocessed
 
 
+def _update_chat_frontmatter(filepath: Path, updates: dict) -> dict:
+    """Read chat frontmatter, apply updates, write back. Returns updated fm_data."""
+    text = filepath.read_text(encoding="utf-8")
+    fm_data, body = _shared_parse_frontmatter(text)
+    fm_data.update(updates)
+    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
+    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
+    return fm_data
+
+
 def mark_chat_processed(
     filepath: Path,
     entities_updated: list[str],
     entities_created: list[str],
 ) -> None:
     """Mark a chat file as processed by updating its frontmatter."""
-    text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _shared_parse_frontmatter(text)
-
-    fm_data["processed"] = True
-    fm_data["processed_at"] = datetime.now().isoformat()
-    fm_data["entities_updated"] = entities_updated
-    fm_data["entities_created"] = entities_created
-
-    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
+    _update_chat_frontmatter(filepath, {
+        "processed": True,
+        "processed_at": datetime.now().isoformat(),
+        "entities_updated": entities_updated,
+        "entities_created": entities_created,
+    })
 
 
 def mark_chat_fallback(
@@ -389,31 +393,24 @@ def mark_chat_fallback(
 
     Sets processed=True plus fallback metadata so it is never retried for extraction.
     """
-    text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _shared_parse_frontmatter(text)
-
-    fm_data["processed"] = True
-    fm_data["processed_at"] = datetime.now().isoformat()
-    fm_data["fallback"] = fallback
+    updates = {
+        "processed": True,
+        "processed_at": datetime.now().isoformat(),
+        "fallback": fallback,
+        "entities_updated": [],
+        "entities_created": [],
+    }
     if error:
-        fm_data["fallback_reason"] = error
-    fm_data["entities_updated"] = []
-    fm_data["entities_created"] = []
-
-    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
+        updates["fallback_reason"] = error
+    _update_chat_frontmatter(filepath, updates)
 
 
 def increment_extraction_retries(filepath: Path) -> int:
     """Increment and return the extraction_retries counter in chat frontmatter."""
     text = filepath.read_text(encoding="utf-8")
-    fm_data, body = _shared_parse_frontmatter(text)
-
+    fm_data, _ = _shared_parse_frontmatter(text)
     retries = fm_data.get("extraction_retries", 0) + 1
-    fm_data["extraction_retries"] = retries
-
-    fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
-    _atomic_write_text(filepath, f"---\n{fm_yaml}---\n{body}")
+    _update_chat_frontmatter(filepath, {"extraction_retries": retries})
     return retries
 
 

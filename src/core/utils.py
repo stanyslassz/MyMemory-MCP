@@ -53,6 +53,16 @@ def atomic_write_text(filepath: Path, content: str) -> None:
         raise
 
 
+def filter_live_facts(facts: list[str]) -> list[str]:
+    """Filter out superseded facts from a fact list."""
+    return [f for f in facts if "[superseded]" not in f]
+
+
+def is_entity_file(rel_parts: tuple[str, ...]) -> bool:
+    """Check if a relative path represents an entity file (not _* dirs or chats/)."""
+    return not any(p.startswith("_") for p in rel_parts) and not (rel_parts and rel_parts[0] == "chats")
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from a markdown file. Returns (fm_dict, body)."""
     text = text.replace("\r\n", "\n")

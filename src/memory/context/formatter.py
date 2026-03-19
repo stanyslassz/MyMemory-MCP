@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 
 from src.core.config import Config
 from src.core.models import GraphData, GraphEntity
-from src.core.utils import estimate_tokens as _estimate_tokens
+from src.core.utils import estimate_tokens as _estimate_tokens, filter_live_facts
 from src.memory.store import read_entity, parse_observation
 from src.memory.context.utilities import (
     _deduplicate_facts_for_context,
     _sort_facts_by_date,
     _group_facts_by_category,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── Fact TTL filtering ─────────────────────────────────────
@@ -153,7 +156,7 @@ def _build_natural_bullet(
         base = entity.summary
     else:
         facts = _read_entity_facts(eid, entity, memory_path)
-        facts = [f for f in facts if "[superseded]" not in f]
+        facts = filter_live_facts(facts)
         if facts:
             # Take the last fact (most recently added), clean markers
             obs = parse_observation(facts[-1])
@@ -231,7 +234,7 @@ def _enrich_entity_natural(
     if entity.summary:
         lines.append(f"Summary: {entity.summary}")
     if facts:
-        facts = [f for f in facts if "[superseded]" not in f]
+        facts = filter_live_facts(facts)
         facts = _filter_expired_facts(facts, config, date.today())
         facts = _deduplicate_facts_for_context(facts, max_per_category=3)
         for f in facts:
@@ -266,7 +269,6 @@ def _build_section_llm(
     section_budget: int,
 ) -> str:
     """Build a section using LLM to generate natural narrative."""
-    import logging as _logging
     from src.memory.context.builder import _rag_prefetch
 
     if not entities:
@@ -294,7 +296,7 @@ def _build_section_llm(
         if result.strip():
             return result
     except Exception as e:
-        _logging.getLogger(__name__).warning("LLM natural section '%s' failed: %s", section_name, e)
+        logger.warning("LLM natural section '%s' failed: %s", section_name, e)
 
     # Deterministic fallback
     lines = []
@@ -338,7 +340,7 @@ def _enrich_entity(
         # Filter superseded facts, sort by date, deduplicate for context
         is_ai_self = entity.type == "ai_self"
         max_cat = (config.ctx.max_facts_per_category_ai_self if is_ai_self else config.ctx.max_facts_per_category) if config else (3 if is_ai_self else 5)
-        facts = [f for f in facts if "[superseded]" not in f]
+        facts = filter_live_facts(facts)
         facts = _filter_expired_facts(facts, config, date.today())
         sorted_facts = _sort_facts_by_date(facts)
         threshold = config.ctx.fact_dedup_threshold if config else 0.35

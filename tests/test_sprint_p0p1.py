@@ -148,13 +148,16 @@ class TestRetryLedger:
 
 class TestReplayCLI:
     def test_replay_list_empty(self):
+        from unittest.mock import patch
         from click.testing import CliRunner
         from src.cli import cli
 
-        result = CliRunner().invoke(cli, [
-            "--config", str(Path(__file__).parent.parent / "config.yaml"),
-            "replay", "--list",
-        ])
+        # Mock list_retriable to avoid reading real _retry_ledger.json
+        with patch("src.pipeline.ingest_state.list_retriable", return_value=[]):
+            result = CliRunner().invoke(cli, [
+                "--config", str(Path(__file__).parent.parent / "config.yaml"),
+                "replay", "--list",
+            ])
         assert result.exit_code == 0
         assert "No retriable failures" in result.output
 

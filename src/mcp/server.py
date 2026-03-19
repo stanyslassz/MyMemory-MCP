@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import threading
+from collections import defaultdict
 from datetime import date as date_cls
 from pathlib import Path
 
@@ -24,6 +26,9 @@ from src.memory.store import (
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("memory-ai")
+
+# Per-entity locks to prevent concurrent CRUD race conditions on the same entity file
+_entity_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
 # Load config at module level — will be initialized when server starts
 _config = None
@@ -168,6 +173,16 @@ def search_rag(query: str) -> dict:
     }
 
 
+def _resolve_entity(entity_name: str, config: Config) -> tuple[str | None, GraphData, str | None]:
+    """Resolve entity name to (entity_id, graph, error_json). Returns error_json if failed."""
+    memory_path = config.memory_path
+    graph = load_graph(memory_path)
+    entity_id = find_entity_by_name(entity_name, graph)
+    if not entity_id:
+        return None, graph, json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+    return entity_id, graph, None
+
+
 def _find_fact_line(facts: list[str], content: str) -> int | None:
     """Find a fact line by case-insensitive substring match on content. Returns index or None."""
     content_lower = content.lower()
@@ -183,34 +198,34 @@ def _find_fact_line(facts: list[str], content: str) -> int | None:
 
 def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> str:
     """Implementation for delete_fact. Returns JSON string."""
-    memory_path = config.memory_path
-    graph = load_graph(memory_path)
-    entity_id = find_entity_by_name(entity_name, graph)
-    if not entity_id:
-        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+    entity_id, graph, err = _resolve_entity(entity_name, config)
+    if err:
+        return err
 
-    entity = graph.entities[entity_id]
-    filepath = memory_path / entity.file
-    if not filepath.exists():
-        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+    with _entity_locks[entity_id]:
+        memory_path = config.memory_path
+        entity = graph.entities[entity_id]
+        filepath = memory_path / entity.file
+        if not filepath.exists():
+            return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
 
-    frontmatter, sections = read_entity(filepath)
-    facts = sections.get("Facts", [])
+        frontmatter, sections = read_entity(filepath)
+        facts = sections.get("Facts", [])
 
-    matched_idx = _find_fact_line(facts, fact_content)
-    if matched_idx is None:
-        return json.dumps({"status": "error", "message": f"Fact containing '{fact_content}' not found in {entity.title}"})
+        matched_idx = _find_fact_line(facts, fact_content)
+        if matched_idx is None:
+            return json.dumps({"status": "error", "message": f"Fact containing '{fact_content}' not found in {entity.title}"})
 
-    deleted_line = facts.pop(matched_idx)
-    sections["Facts"] = facts
+        deleted_line = facts.pop(matched_idx)
+        sections["Facts"] = facts
 
-    # Add history entry
-    today = date_cls.today().isoformat()
-    history = sections.get("History", [])
-    history.append(f"- {today}: Deleted fact: {fact_content[:60]}")
-    sections["History"] = history
+        # Add history entry
+        today = date_cls.today().isoformat()
+        history = sections.get("History", [])
+        history.append(f"- {today}: Deleted fact: {fact_content[:60]}")
+        sections["History"] = history
 
-    write_entity(filepath, frontmatter, sections)
+        write_entity(filepath, frontmatter, sections)
 
     return json.dumps({
         "status": "deleted",
@@ -221,33 +236,33 @@ def _delete_fact_impl(entity_name: str, fact_content: str, config: Config) -> st
 
 def _delete_relation_impl(from_entity: str, to_entity: str, relation_type: str, config: Config) -> str:
     """Implementation for delete_relation. Returns JSON string."""
-    memory_path = config.memory_path
-    graph = load_graph(memory_path)
-
-    from_id = find_entity_by_name(from_entity, graph)
-    if not from_id:
-        return json.dumps({"status": "error", "message": f"Source entity '{from_entity}' not found"})
+    from_id, graph, err = _resolve_entity(from_entity, config)
+    if err:
+        return err
 
     to_id = find_entity_by_name(to_entity, graph)
     if not to_id:
         return json.dumps({"status": "error", "message": f"Target entity '{to_entity}' not found"})
 
-    # Remove from graph
-    removed = remove_relation(graph, from_id, to_id, relation_type)
-    if not removed:
-        return json.dumps({
-            "status": "error",
-            "message": f"Relation '{relation_type}' from '{from_entity}' to '{to_entity}' not found in graph",
-        })
+    with _entity_locks[from_id]:
+        memory_path = config.memory_path
 
-    # Remove from source entity MD file
-    from_entity_data = graph.entities[from_id]
-    from_path = memory_path / from_entity_data.file
-    to_entity_data = graph.entities[to_id]
-    if from_path.exists():
-        remove_relation_line(from_path, relation_type, to_entity_data.title)
+        # Remove from graph
+        removed = remove_relation(graph, from_id, to_id, relation_type)
+        if not removed:
+            return json.dumps({
+                "status": "error",
+                "message": f"Relation '{relation_type}' from '{from_entity}' to '{to_entity}' not found in graph",
+            })
 
-    save_graph(memory_path, graph)
+        # Remove from source entity MD file
+        from_entity_data = graph.entities[from_id]
+        from_path = memory_path / from_entity_data.file
+        to_entity_data = graph.entities[to_id]
+        if from_path.exists():
+            remove_relation_line(from_path, relation_type, to_entity_data.title)
+
+        save_graph(memory_path, graph)
 
     return json.dumps({
         "status": "deleted",
@@ -259,40 +274,40 @@ def _delete_relation_impl(from_entity: str, to_entity: str, relation_type: str, 
 
 def _modify_fact_impl(entity_name: str, old_content: str, new_content: str, config: Config) -> str:
     """Implementation for modify_fact. Returns JSON string."""
-    memory_path = config.memory_path
-    graph = load_graph(memory_path)
-    entity_id = find_entity_by_name(entity_name, graph)
-    if not entity_id:
-        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+    entity_id, graph, err = _resolve_entity(entity_name, config)
+    if err:
+        return err
 
-    entity = graph.entities[entity_id]
-    filepath = memory_path / entity.file
-    if not filepath.exists():
-        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+    with _entity_locks[entity_id]:
+        memory_path = config.memory_path
+        entity = graph.entities[entity_id]
+        filepath = memory_path / entity.file
+        if not filepath.exists():
+            return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
 
-    frontmatter, sections = read_entity(filepath)
-    facts = sections.get("Facts", [])
+        frontmatter, sections = read_entity(filepath)
+        facts = sections.get("Facts", [])
 
-    matched_idx = _find_fact_line(facts, old_content)
-    if matched_idx is None:
-        return json.dumps({"status": "error", "message": f"Fact containing '{old_content}' not found in {entity.title}"})
+        matched_idx = _find_fact_line(facts, old_content)
+        if matched_idx is None:
+            return json.dumps({"status": "error", "message": f"Fact containing '{old_content}' not found in {entity.title}"})
 
-    # Parse the matched line to preserve metadata
-    old_line = facts[matched_idx]
-    obs = parse_observation(old_line)
-    old_fact_content = obs["content"]
-    obs["content"] = new_content
-    new_line = format_observation(obs)
-    facts[matched_idx] = new_line
-    sections["Facts"] = facts
+        # Parse the matched line to preserve metadata
+        old_line = facts[matched_idx]
+        obs = parse_observation(old_line)
+        old_fact_content = obs["content"]
+        obs["content"] = new_content
+        new_line = format_observation(obs)
+        facts[matched_idx] = new_line
+        sections["Facts"] = facts
 
-    # Add history entry
-    today = date_cls.today().isoformat()
-    history = sections.get("History", [])
-    history.append(f"- {today}: Modified fact: '{old_fact_content[:40]}' -> '{new_content[:40]}'")
-    sections["History"] = history
+        # Add history entry
+        today = date_cls.today().isoformat()
+        history = sections.get("History", [])
+        history.append(f"- {today}: Modified fact: '{old_fact_content[:40]}' -> '{new_content[:40]}'")
+        sections["History"] = history
 
-    write_entity(filepath, frontmatter, sections)
+        write_entity(filepath, frontmatter, sections)
 
     return json.dumps({
         "status": "modified",
@@ -311,53 +326,53 @@ def _correct_entity_impl(entity_name: str, field: str, new_value: str, config: C
             "message": f"Invalid field '{field}'. Allowed: {', '.join(sorted(allowed_fields))}",
         })
 
-    memory_path = config.memory_path
-    graph = load_graph(memory_path)
-    entity_id = find_entity_by_name(entity_name, graph)
-    if not entity_id:
-        return json.dumps({"status": "error", "message": f"Entity '{entity_name}' not found"})
+    entity_id, graph, err = _resolve_entity(entity_name, config)
+    if err:
+        return err
 
-    entity = graph.entities[entity_id]
-    filepath = memory_path / entity.file
-    if not filepath.exists():
-        return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
+    with _entity_locks[entity_id]:
+        memory_path = config.memory_path
+        entity = graph.entities[entity_id]
+        filepath = memory_path / entity.file
+        if not filepath.exists():
+            return json.dumps({"status": "error", "message": f"Entity file not found: {entity.file}"})
 
-    frontmatter, sections = read_entity(filepath)
-    old_value = getattr(frontmatter, field)
-    changes = {"field": field, "old": str(old_value), "new": new_value}
+        frontmatter, sections = read_entity(filepath)
+        old_value = getattr(frontmatter, field)
+        changes = {"field": field, "old": str(old_value), "new": new_value}
 
-    if field == "title":
-        frontmatter.title = new_value
-        entity.title = new_value
-    elif field == "type":
-        frontmatter.type = new_value
-        entity.type = new_value
-        # Move file to correct folder
-        new_folder = config.get_folder_for_type(new_value)
-        new_filepath = memory_path / new_folder / filepath.name
-        if new_filepath != filepath:
-            new_filepath.parent.mkdir(parents=True, exist_ok=True)
-            write_entity(filepath, frontmatter, sections)  # Save before move
-            shutil.move(str(filepath), str(new_filepath))
-            new_rel = str(new_filepath.relative_to(memory_path))
-            entity.file = new_rel
-            filepath = new_filepath  # Update for final write below
-            changes["moved_to"] = new_rel
-    elif field == "aliases":
-        aliases = [a.strip() for a in new_value.split(",") if a.strip()]
-        frontmatter.aliases = aliases
-        entity.aliases = aliases
-    elif field == "retention":
-        frontmatter.retention = new_value
+        if field == "title":
+            frontmatter.title = new_value
+            entity.title = new_value
+        elif field == "type":
+            frontmatter.type = new_value
+            entity.type = new_value
+            # Move file to correct folder
+            new_folder = config.get_folder_for_type(new_value)
+            new_filepath = memory_path / new_folder / filepath.name
+            if new_filepath != filepath:
+                new_filepath.parent.mkdir(parents=True, exist_ok=True)
+                write_entity(filepath, frontmatter, sections)  # Save before move
+                shutil.move(str(filepath), str(new_filepath))
+                new_rel = str(new_filepath.relative_to(memory_path))
+                entity.file = new_rel
+                filepath = new_filepath  # Update for final write below
+                changes["moved_to"] = new_rel
+        elif field == "aliases":
+            aliases = [a.strip() for a in new_value.split(",") if a.strip()]
+            frontmatter.aliases = aliases
+            entity.aliases = aliases
+        elif field == "retention":
+            frontmatter.retention = new_value
 
-    # Add history entry
-    today = date_cls.today().isoformat()
-    history = sections.get("History", [])
-    history.append(f"- {today}: Corrected {field}: '{old_value}' -> '{new_value}'")
-    sections["History"] = history
+        # Add history entry
+        today = date_cls.today().isoformat()
+        history = sections.get("History", [])
+        history.append(f"- {today}: Corrected {field}: '{old_value}' -> '{new_value}'")
+        sections["History"] = history
 
-    write_entity(filepath, frontmatter, sections)
-    save_graph(memory_path, graph)
+        write_entity(filepath, frontmatter, sections)
+        save_graph(memory_path, graph)
 
     return json.dumps({"status": "updated", "entity": entity.title, "changes": changes})
 

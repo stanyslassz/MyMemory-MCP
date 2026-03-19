@@ -14,6 +14,7 @@ import numpy as np
 
 from src.core.config import Config
 from src.core.models import SearchResult
+from src.core.utils import is_entity_file
 
 logger = logging.getLogger(__name__)
 
@@ -242,26 +243,27 @@ def _get_entity_files(memory_path: Path) -> list[Path]:
     files = []
     for md_file in sorted(memory_path.rglob("*.md")):
         rel = md_file.relative_to(memory_path)
-        parts = rel.parts
-        if any(p.startswith("_") for p in parts) or (parts and parts[0] == "chats"):
+        if not is_entity_file(rel.parts):
             continue
         files.append(md_file)
     return files
 
 
 def build_index(memory_path: Path, config: Config) -> dict:
-    """Build FAISS index from scratch. Returns manifest."""
+    """Build FAISS index from scratch using IndexIDMap for delta support. Returns manifest."""
     import faiss
 
     embed_fn = get_embedding_fn(config)
     files = _get_entity_files(memory_path)
 
     all_chunks: list[str] = []
-    chunk_mapping: list[dict] = []  # [{file, entity_id, chunk_idx}, ...]
+    # Dict keyed by FAISS ID for O(1) lookup during search and delta updates
+    chunk_mapping: dict[int, dict] = {}
     manifest = {
         "embedding_model": f"{config.embeddings.provider}/{config.embeddings.model}",
         "last_build": datetime.now().isoformat(),
         "indexed_files": {},
+        "next_id": 0,
     }
 
     for md_file in files:
@@ -279,19 +281,22 @@ def build_index(memory_path: Path, config: Config) -> dict:
 
         start_idx = len(all_chunks)
         for i, chunk in enumerate(chunks):
+            vec_id = start_idx + i
             all_chunks.append(chunk)
-            chunk_mapping.append({
+            chunk_mapping[vec_id] = {
                 "file": rel_path,
                 "entity_id": entity_id,
                 "chunk_idx": i,
                 "chunk_text": chunk,
-            })
+            }
 
         manifest["indexed_files"][rel_path] = {
             "hash": file_hash,
             "chunks": len(chunks),
             "ids": list(range(start_idx, start_idx + len(chunks))),
         }
+
+    manifest["next_id"] = len(all_chunks)
 
     if not all_chunks:
         # Probe embedding function to get actual dimension
@@ -300,7 +305,8 @@ def build_index(memory_path: Path, config: Config) -> dict:
             dim = probe.shape[1]
         except Exception:
             dim = 384  # fallback for all-MiniLM-L6-v2
-        index = faiss.IndexFlatIP(dim)
+        base_index = faiss.IndexFlatIP(dim)
+        index = faiss.IndexIDMap(base_index)
         _save_index(config, index, chunk_mapping, manifest)
         return manifest
 
@@ -308,50 +314,18 @@ def build_index(memory_path: Path, config: Config) -> dict:
     embeddings = embed_fn(all_chunks)
     dim = embeddings.shape[1]
 
-    # Build FAISS index (Inner Product for cosine similarity on normalized vectors)
-    index = faiss.IndexFlatIP(dim)
-    index.add(embeddings.astype(np.float32))
+    # Build FAISS IndexIDMap wrapping IndexFlatIP for delta update support
+    base_index = faiss.IndexFlatIP(dim)
+    index = faiss.IndexIDMap(base_index)
+    ids = np.arange(len(all_chunks), dtype=np.int64)
+    index.add_with_ids(embeddings.astype(np.float32), ids)
 
     _save_index(config, index, chunk_mapping, manifest)
     return manifest
 
 
-def incremental_update(memory_path: Path, config: Config) -> dict:
-    """Incrementally update FAISS index — only re-index modified files."""
-    manifest = load_manifest(config.faiss.manifest_path)
-
-    # Check if model changed → full rebuild
-    current_model = f"{config.embeddings.provider}/{config.embeddings.model}"
-    if manifest.get("embedding_model") != current_model:
-        logger.info("Embedding model changed, performing full rebuild")
-        manifest = build_index(memory_path, config)
-        try:
-            from src.pipeline.keyword_index import build_keyword_index
-
-            fts_db_path = memory_path / config.search.fts_db_path
-            build_keyword_index(memory_path, fts_db_path, chunk_size=config.embeddings.chunk_size, chunk_overlap=config.embeddings.chunk_overlap)
-        except Exception:
-            logger.warning("Failed to build FTS5 keyword index", exc_info=True)
-        return manifest
-
-    files = _get_entity_files(memory_path)
-    changed_files = []
-
-    for md_file in files:
-        rel_path = str(md_file.relative_to(memory_path))
-        file_hash = _file_hash(md_file)
-        indexed = manifest.get("indexed_files", {}).get(rel_path)
-        if not indexed or indexed.get("hash") != file_hash:
-            changed_files.append(md_file)
-
-    if not changed_files:
-        return manifest  # Nothing to update
-
-    # For simplicity in v1: full rebuild if anything changed
-    # A true incremental update would selectively replace vectors
-    manifest = build_index(memory_path, config)
-
-    # Rebuild FTS5 keyword index alongside FAISS
+def _rebuild_keyword_index(memory_path: Path, config: Config) -> None:
+    """Rebuild FTS5 keyword index alongside FAISS. Swallows errors."""
     try:
         from src.pipeline.keyword_index import build_keyword_index
 
@@ -360,11 +334,192 @@ def incremental_update(memory_path: Path, config: Config) -> dict:
     except Exception:
         logger.warning("Failed to build FTS5 keyword index", exc_info=True)
 
+
+def incremental_update(memory_path: Path, config: Config) -> dict:
+    """Incrementally update FAISS index — delta re-indexing for modified files.
+
+    Uses IndexIDMap to selectively remove and re-add vectors for changed files.
+    Falls back to full rebuild if >30% of files changed or if the index format
+    doesn't support delta updates (legacy IndexFlatIP without IDMap).
+    """
+    import faiss
+
+    manifest = load_manifest(config.faiss.manifest_path)
+
+    # Check if model changed → full rebuild
+    current_model = f"{config.embeddings.provider}/{config.embeddings.model}"
+    if manifest.get("embedding_model") != current_model:
+        logger.info("Embedding model changed, performing full rebuild")
+        manifest = build_index(memory_path, config)
+        _rebuild_keyword_index(memory_path, config)
+        return manifest
+
+    files = _get_entity_files(memory_path)
+    current_file_paths = {str(f.relative_to(memory_path)) for f in files}
+    indexed_files = manifest.get("indexed_files", {})
+
+    # Detect changes: modified, new, and deleted files
+    changed_files: list[Path] = []
+    new_files: list[Path] = []
+    deleted_paths: list[str] = []
+
+    for md_file in files:
+        rel_path = str(md_file.relative_to(memory_path))
+        file_hash = _file_hash(md_file)
+        indexed = indexed_files.get(rel_path)
+        if not indexed:
+            new_files.append(md_file)
+        elif indexed.get("hash") != file_hash:
+            changed_files.append(md_file)
+
+    for rel_path in indexed_files:
+        # Skip non-entity entries (e.g., _doc/ entries from doc_ingest)
+        if indexed_files[rel_path].get("source_type") == "document":
+            continue
+        if rel_path not in current_file_paths:
+            deleted_paths.append(rel_path)
+
+    total_changes = len(changed_files) + len(new_files) + len(deleted_paths)
+
+    if total_changes == 0:
+        return manifest  # Nothing to update
+
+    total_files = max(len(files), len(indexed_files), 1)
+    change_ratio = total_changes / total_files
+
+    # Fall back to full rebuild if >30% changed or no next_id (legacy format)
+    if change_ratio > 0.3 or "next_id" not in manifest:
+        logger.info(
+            "Delta ratio %.0f%% (changed=%d, new=%d, deleted=%d) — full rebuild",
+            change_ratio * 100, len(changed_files), len(new_files), len(deleted_paths),
+        )
+        manifest = build_index(memory_path, config)
+        _rebuild_keyword_index(memory_path, config)
+        return manifest
+
+    # ── Delta update ──────────────────────────────────────────
+    logger.info(
+        "Delta update: %d changed, %d new, %d deleted (%.0f%% of %d files)",
+        len(changed_files), len(new_files), len(deleted_paths),
+        change_ratio * 100, total_files,
+    )
+
+    index_path = Path(config.faiss.index_path)
+    mapping_path = Path(config.faiss.mapping_path)
+
+    if not index_path.exists() or not mapping_path.exists():
+        manifest = build_index(memory_path, config)
+        _rebuild_keyword_index(memory_path, config)
+        return manifest
+
+    # Load existing index and mapping
+    index = faiss.read_index(str(index_path))
+    with open(mapping_path, "rb") as f:
+        raw_mapping = pickle.load(f)
+
+    # Normalize mapping to dict format (backwards compat with list format)
+    if isinstance(raw_mapping, list):
+        chunk_mapping: dict[int, dict] = {i: cm for i, cm in enumerate(raw_mapping)}
+    else:
+        chunk_mapping = raw_mapping
+
+    # Verify we have an IndexIDMap (supports remove_ids)
+    if not hasattr(index, "remove_ids"):
+        logger.info("Index does not support remove_ids, performing full rebuild")
+        manifest = build_index(memory_path, config)
+        _rebuild_keyword_index(memory_path, config)
+        return manifest
+
+    embed_fn = get_embedding_fn(config)
+    next_id = manifest.get("next_id", max(chunk_mapping.keys(), default=-1) + 1)
+
+    # Step 1: Collect IDs to remove (changed + deleted files)
+    ids_to_remove: list[int] = []
+    files_to_remove = {str(f.relative_to(memory_path)) for f in changed_files} | set(deleted_paths)
+
+    for rel_path in files_to_remove:
+        entry = indexed_files.get(rel_path)
+        if entry and "ids" in entry:
+            ids_to_remove.extend(entry["ids"])
+
+    # Remove old vectors from index
+    if ids_to_remove:
+        remove_array = np.array(ids_to_remove, dtype=np.int64)
+        index.remove_ids(remove_array)
+
+    # Remove old entries from chunk_mapping
+    for vec_id in ids_to_remove:
+        chunk_mapping.pop(vec_id, None)
+
+    # Remove from manifest
+    for rel_path in files_to_remove:
+        indexed_files.pop(rel_path, None)
+    for rel_path in deleted_paths:
+        indexed_files.pop(rel_path, None)
+
+    # Step 2: Add new/changed files
+    files_to_add = changed_files + new_files
+    new_chunks: list[str] = []
+    new_ids: list[int] = []
+
+    for md_file in files_to_add:
+        text = md_file.read_text(encoding="utf-8")
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            text = parts[2] if len(parts) >= 3 else text
+
+        file_hash = _file_hash(md_file)
+        rel_path = str(md_file.relative_to(memory_path))
+        entity_id = md_file.stem
+
+        chunks = chunk_text(
+            text, config.embeddings.chunk_size, config.embeddings.chunk_overlap,
+            language=config.user_language,
+        )
+
+        file_ids = []
+        for i, chunk in enumerate(chunks):
+            chunk_id = next_id
+            next_id += 1
+            new_chunks.append(chunk)
+            new_ids.append(chunk_id)
+            file_ids.append(chunk_id)
+            chunk_mapping[chunk_id] = {
+                "file": rel_path,
+                "entity_id": entity_id,
+                "chunk_idx": i,
+                "chunk_text": chunk,
+            }
+
+        indexed_files[rel_path] = {
+            "hash": file_hash,
+            "chunks": len(chunks),
+            "ids": file_ids,
+        }
+
+    # Embed and add new vectors
+    if new_chunks:
+        embeddings = embed_fn(new_chunks)
+        ids_array = np.array(new_ids, dtype=np.int64)
+        index.add_with_ids(embeddings.astype(np.float32), ids_array)
+
+    # Update manifest
+    manifest["last_build"] = datetime.now().isoformat()
+    manifest["next_id"] = next_id
+
+    _save_index(config, index, chunk_mapping, manifest)
+    _rebuild_keyword_index(memory_path, config)
+
     return manifest
 
 
 def search(query: str, config: Config, memory_path: Path, top_k: int | None = None) -> list[SearchResult]:
-    """Search the FAISS index for similar chunks."""
+    """Search the FAISS index for similar chunks.
+
+    Supports both legacy list-based and new dict-based chunk mappings.
+    With IndexIDMap, returned indices are custom IDs used as dict keys.
+    With legacy IndexFlatIP, returned indices are positional into the list.
+    """
     import faiss
 
     if top_k is None:
@@ -383,10 +538,16 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
 
     index = faiss.read_index(str(index_path))
     with open(mapping_path, "rb") as f:
-        chunk_mapping = pickle.load(f)
+        raw_mapping = pickle.load(f)
 
     if index.ntotal == 0:
         return []
+
+    # Normalize mapping: dict (new format) or list (legacy format)
+    if isinstance(raw_mapping, list):
+        chunk_mapping: dict[int, dict] = {i: cm for i, cm in enumerate(raw_mapping)}
+    else:
+        chunk_mapping = raw_mapping
 
     embed_fn = get_embedding_fn(config)
     query_vec = embed_fn([query]).astype(np.float32)
@@ -396,9 +557,12 @@ def search(query: str, config: Config, memory_path: Path, top_k: int | None = No
 
     results = []
     for score, idx in zip(scores[0], indices[0]):
-        if idx < 0 or idx >= len(chunk_mapping):
+        if idx < 0:
             continue
-        mapping = chunk_mapping[idx]
+        mapping = chunk_mapping.get(int(idx))
+        if mapping is None:
+            continue
+
         results.append(SearchResult(
             entity_id=mapping["entity_id"],
             file=mapping["file"],
@@ -436,7 +600,7 @@ def mark_doc_extracted(manifest_path: str, doc_key: str) -> None:
         save_manifest(manifest_path, manifest)
 
 
-def _save_index(config: Config, index, chunk_mapping: list[dict], manifest: dict) -> None:
+def _save_index(config: Config, index, chunk_mapping: dict[int, dict] | list[dict], manifest: dict) -> None:
     """Save FAISS index, mapping, and manifest to disk."""
     import faiss
 

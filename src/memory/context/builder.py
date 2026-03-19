@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -22,6 +23,21 @@ from src.memory.context.formatter import (
     _enrich_entity,
     _collect_section,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _make_section_budget_fn(config: Config) -> tuple[int, dict, callable]:
+    """Create a section budget calculator from config. Returns (total_budget, budget_dict, fn)."""
+    reserved = config.ctx.reserved_tokens_structured
+    total_budget = max(config.context_max_tokens - reserved, config.ctx.min_budget_tokens)
+    budget = config.context_budget or {}
+
+    def section_budget(key: str) -> int:
+        pct = budget.get(key, config.ctx.default_budget_pct)
+        return int(total_budget * pct / 100)
+
+    return total_budget, budget, section_budget
 
 
 def build_natural_context(
@@ -178,13 +194,7 @@ def build_context(
         custom_instructions = instructions_path.read_text(encoding="utf-8")
 
     # Budget calculation
-    reserved = config.ctx.reserved_tokens_structured
-    total_budget = max(config.context_max_tokens - reserved, config.ctx.min_budget_tokens)
-    budget = config.context_budget or {}
-
-    def section_budget(key: str) -> int:
-        pct = budget.get(key, config.ctx.default_budget_pct)
-        return int(total_budget * pct / 100)
+    _, _, section_budget = _make_section_budget_fn(config)
 
     # Get all scored entities above threshold
     min_score = config.scoring.min_score_for_context
@@ -341,10 +351,8 @@ def build_context_with_llm(
     Each section is processed independently by the LLM for better quality
     with small models. Falls back to deterministic if LLM calls fail.
     """
-    import logging
     from src.core.llm import call_context_section
 
-    logger = logging.getLogger(__name__)
     today = date.today()
     today_str = today.isoformat()
 
@@ -362,13 +370,7 @@ def build_context_with_llm(
         custom_instructions = instructions_path.read_text(encoding="utf-8")
 
     # Budget calculation
-    reserved = config.ctx.reserved_tokens_structured
-    total_budget = max(config.context_max_tokens - reserved, config.ctx.min_budget_tokens)
-    budget = config.context_budget or {}
-
-    def section_budget(key: str) -> int:
-        pct = budget.get(key, config.ctx.default_budget_pct)
-        return int(total_budget * pct / 100)
+    _, _, section_budget = _make_section_budget_fn(config)
 
     # Get all scored entities above threshold
     min_score = config.scoring.min_score_for_context

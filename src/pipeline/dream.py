@@ -22,6 +22,7 @@ from typing import get_args
 from rich.console import Console
 
 from src.core.config import Config
+from src.core.utils import filter_live_facts
 from src.core.models import GraphData, GraphRelation, RelationType
 from src.memory.event_log import append_event
 
@@ -252,7 +253,8 @@ def run_dream(
                     try:
                         from src.pipeline.indexer import list_unextracted_docs as _list_docs
                         docs_before = len(_list_docs(config.faiss.manifest_path))
-                    except Exception:
+                    except Exception as e:
+                        logger.warning("Could not count unextracted docs: %s", e)
                         docs_before = 0
                     n = _step_extract_documents(graph, memory_path, config, console, report, dry_run)
                     step_details = {"docs_found": docs_before, "docs_extracted": n}
@@ -439,8 +441,8 @@ def run_dream(
     # Generate report (even in dry_run — events were logged regardless)
     try:
         _generate_dream_report(memory_path, dream_id, session_start_ts)
-    except Exception:
-        pass  # Report generation is best-effort
+    except Exception as e:
+        logger.warning("Dream report generation failed: %s", e)
 
     return report
 
@@ -472,8 +474,8 @@ def _collect_dream_stats(
     try:
         docs = list_unextracted_docs(config.faiss.manifest_path)
         counts["unextracted_docs"] = len(docs)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not list unextracted docs: %s", e)
 
     # Consolidation candidates (facts > max_facts for type)
     for eid, path in entity_paths.items():
@@ -481,11 +483,11 @@ def _collect_dream_stats(
             entity = graph.entities.get(eid)
             max_facts = config.get_max_facts(entity.type) if entity else 50
             _, sections = read_entity(path)
-            facts = [f for f in sections.get("Facts", []) if "[superseded]" not in f]
+            facts = filter_live_facts(sections.get("Facts", []))
             if len(facts) > max_facts:
                 counts["consolidation_candidates"] += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not check consolidation candidate %s: %s", eid, e)
 
     # Merge candidates (slug/alias overlap)
     seen_pairs: set[tuple[str, str]] = set()
@@ -609,13 +611,13 @@ def _count_live_facts(entity_paths: dict[str, Path]) -> int:
     from src.memory.store import read_entity
 
     total = 0
-    for path in entity_paths.values():
+    for eid, path in entity_paths.items():
         try:
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
-            total += sum(1 for f in facts if "[superseded]" not in f)
-        except Exception:
-            pass
+            total += len(filter_live_facts(facts))
+        except Exception as e:
+            logger.debug("Could not count facts for %s: %s", eid, e)
     return total
 
 
@@ -672,11 +674,17 @@ def _step_extract_documents(
             continue
 
         with open(mapping_path, "rb") as f:
-            chunk_mapping = pickle.load(f)
+            raw_mapping = pickle.load(f)
+
+        # Normalize: dict (new format) or list (legacy)
+        if isinstance(raw_mapping, dict):
+            mapping_values = raw_mapping.values()
+        else:
+            mapping_values = raw_mapping
 
         # Gather chunks for this document, sorted by index
         doc_chunks = sorted(
-            [c for c in chunk_mapping if c.get("file") == doc_key],
+            [c for c in mapping_values if c.get("file") == doc_key],
             key=lambda c: c.get("chunk_idx", 0),
         )
         if not doc_chunks:
@@ -725,7 +733,7 @@ def _step_consolidate_facts(
             max_facts = config.get_max_facts(entity.type)
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
-            live_facts = [f for f in facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(facts)
             if len(live_facts) <= max_facts:
                 continue
 
@@ -764,7 +772,8 @@ def _find_faiss_dedup_candidates(
 
     try:
         from src.memory.rag import search as rag_search, SearchOptions
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not import RAG search for FAISS dedup: %s", e)
         return []
 
     candidates: list[tuple[str, str]] = []
@@ -781,7 +790,8 @@ def _find_faiss_dedup_candidates(
             results = rag_search(entity.title, config, memory_path, SearchOptions(
                 top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
             ))
-        except Exception:
+        except Exception as e:
+            logger.debug("FAISS dedup search failed for %s: %s", eid, e)
             continue
 
         for result in results:
@@ -892,6 +902,12 @@ def _step_merge_entities(
             report.entities_merged += 1
             continue
 
+        logger.info(
+            "Merging entity '%s' (score=%.3f, freq=%d) into '%s' (score=%.3f, freq=%d), source=%s",
+            drop_entity.title, drop_entity.score, drop_entity.frequency,
+            keep_entity.title, keep_entity.score, keep_entity.frequency,
+            "FAISS+LLM" if pair_key in faiss_pair_set else "deterministic",
+        )
         console.print(f"  [cyan]Merging '{drop_entity.title}' -> '{keep_entity.title}'[/cyan]")
         try:
             _do_merge(keep, drop, graph, memory_path, config, entity_paths)
@@ -1013,7 +1029,8 @@ def _step_discover_relations(
             results = rag_search(entity.title, config, memory_path, SearchOptions(
                 top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
             ))
-        except Exception:
+        except Exception as e:
+            logger.debug("Relation discovery search failed for %s: %s", eid, e)
             continue
 
         for result in results:
@@ -1094,10 +1111,10 @@ def _build_dossier(eid: str, entity, memory_path: Path, config: Config | None = 
         try:
             _, sections = read_entity(path)
             facts = sections.get("Facts", [])
-            live_facts = [f for f in facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(facts)
             facts_text = "\n".join(live_facts[:max_facts])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read dossier for %s: %s", eid, e)
 
     lines = [f"Title: {entity.title}", f"Type: {entity.type}"]
     if entity.tags:
@@ -1270,6 +1287,11 @@ def _step_prune_dead(
             report.entities_pruned += 1
             continue
 
+        logger.info(
+            "Pruning entity '%s' (id=%s, score=%.3f, freq=%d, retention=%s, created=%s)",
+            entity.title, eid, entity.score, entity.frequency,
+            entity.retention, entity.created,
+        )
         console.print(f"  [yellow]Archiving: {entity.title}[/yellow]")
         try:
             if entity_path.exists():
@@ -1318,7 +1340,7 @@ def _step_generate_summaries(
         try:
             fm, sections = read_entity(path)
             facts = sections.get("Facts", [])
-            live_facts = [f for f in facts if "[superseded]" not in f]
+            live_facts = filter_live_facts(facts)
             if not live_facts:
                 continue
 

@@ -44,8 +44,21 @@ def test_consolidate_entity_facts_passes_max_facts(tmp_path):
         aliases=[],
         tags=[],
     )
-    # Create entity with many facts
-    obs = [{"category": "ai_style", "content": f"Fact number {i}", "tags": []} for i in range(25)]
+    # Create entity with diverse facts (content must differ enough to avoid Levenshtein dedup)
+    topics = [
+        "Prefers concise responses", "Uses bullet points for lists", "Avoids jargon",
+        "Adapts tone to user mood", "Focuses on actionable advice", "Provides code examples",
+        "Explains reasoning step by step", "Uses French for health topics",
+        "Checks understanding before proceeding", "Summarizes at end of conversation",
+        "Prefers markdown formatting", "Asks clarifying questions", "Avoids assumptions",
+        "Uses analogies for complex topics", "Maintains conversation context",
+        "Tracks user preferences over time", "Adjusts verbosity dynamically",
+        "Prioritizes safety in medical topics", "Cross-references past conversations",
+        "Offers alternative perspectives", "Uses structured output when helpful",
+        "Validates data before processing", "Handles ambiguity gracefully",
+        "Respects user privacy boundaries", "Provides sources when possible",
+    ]
+    obs = [{"category": "ai_style", "content": topics[i], "tags": []} for i in range(25)]
     filepath = create_entity(tmp_path, "self", "test-entity", fm, observations=obs)
 
     mock_result = MagicMock()
