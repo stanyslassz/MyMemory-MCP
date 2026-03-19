@@ -55,7 +55,7 @@ def test_merge_saves_graph_per_iteration(tmp_path):
     report = DreamReport()
 
     with patch("src.memory.graph.save_graph") as mock_save, \
-         patch("src.pipeline.dream._find_faiss_dedup_candidates", return_value=[]):
+         patch("src.pipeline.dream.merger._find_faiss_dedup_candidates", return_value=[]):
         _step_merge_entities(graph, memory_path, config, console, report, dry_run=False, entity_paths={
             "alice": memory_path / "close_ones/alice.md",
             "alice-dupont": memory_path / "close_ones/alice-dupont.md",

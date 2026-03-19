@@ -38,7 +38,7 @@ def test_dream_emits_session_events(tmp_path):
     from src.core.models import GraphData
     empty_graph = GraphData(generated=datetime.now().isoformat(), entities={}, relations=[])
 
-    with patch("src.pipeline.dream._step_load", return_value=(empty_graph, {})):
+    with patch("src.pipeline.dream.maintenance._step_load", return_value=(empty_graph, {})):
         run_dream(config, console, dry_run=True, step=1)
 
     events = read_events(config.memory_path, source="dream", limit=10_000)
@@ -60,7 +60,7 @@ def test_dream_emits_step_events(tmp_path):
     from src.core.models import GraphData
     empty_graph = GraphData(generated=datetime.now().isoformat(), entities={}, relations=[])
 
-    with patch("src.pipeline.dream._step_load", return_value=(empty_graph, {})):
+    with patch("src.pipeline.dream.maintenance._step_load", return_value=(empty_graph, {})):
         run_dream(config, console, dry_run=True, step=1)
 
     events = read_events(config.memory_path, source="dream", limit=10_000)
@@ -82,7 +82,7 @@ def test_dream_step_completed_has_duration(tmp_path):
     from src.core.models import GraphData
     empty_graph = GraphData(generated=datetime.now().isoformat(), entities={}, relations=[])
 
-    with patch("src.pipeline.dream._step_load", return_value=(empty_graph, {})):
+    with patch("src.pipeline.dream.maintenance._step_load", return_value=(empty_graph, {})):
         run_dream(config, console, dry_run=True, step=1)
 
     events = read_events(config.memory_path, source="dream", limit=10_000)
@@ -112,7 +112,7 @@ def test_dream_step_completed_has_details(tmp_path):
         relations=[],
     )
 
-    with patch("src.pipeline.dream._step_load", return_value=(graph, {})):
+    with patch("src.pipeline.dream.maintenance._step_load", return_value=(graph, {})):
         run_dream(config, console, dry_run=True, step=1)
 
     events = read_events(config.memory_path, source="dream", limit=10_000)

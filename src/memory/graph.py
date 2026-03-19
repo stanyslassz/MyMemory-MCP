@@ -103,6 +103,7 @@ def add_relation(graph: GraphData, relation: GraphRelation, *, strength_growth: 
             existing.strength = min(1.0, existing.strength + strength_growth)
             if relation.context and not existing.context:
                 existing.context = relation.context
+            graph.invalidate_adjacency()
             return graph
     # New relation
     if not relation.created:
@@ -110,6 +111,7 @@ def add_relation(graph: GraphData, relation: GraphRelation, *, strength_growth: 
     if not relation.last_reinforced:
         relation.last_reinforced = relation.created
     graph.relations.append(relation)
+    graph.invalidate_adjacency()
     return graph
 
 
@@ -120,15 +122,21 @@ def remove_relation(graph: GraphData, from_entity: str, to_entity: str, rel_type
         r for r in graph.relations
         if not (r.from_entity == from_entity and r.to_entity == to_entity and r.type == rel_type)
     ]
-    return len(graph.relations) < before
+    removed = len(graph.relations) < before
+    if removed:
+        graph.invalidate_adjacency()
+    return removed
 
 
 def remove_orphan_relations(graph: GraphData) -> GraphData:
     """Remove relations that reference non-existent entities."""
+    before = len(graph.relations)
     graph.relations = [
         r for r in graph.relations
         if r.from_entity in graph.entities and r.to_entity in graph.entities
     ]
+    if len(graph.relations) < before:
+        graph.invalidate_adjacency()
     return graph
 
 
@@ -137,6 +145,7 @@ def get_related(graph: GraphData, entity_id: str, depth: int = 1) -> list[str]:
     if entity_id not in graph.entities:
         return []
 
+    adj = graph.get_adjacency()
     visited = set()
     queue = [(entity_id, 0)]
     result = []
@@ -151,11 +160,10 @@ def get_related(graph: GraphData, entity_id: str, depth: int = 1) -> list[str]:
             result.append(current)
 
         if d < depth:
-            for rel in graph.relations:
-                if rel.from_entity == current and rel.to_entity not in visited:
-                    queue.append((rel.to_entity, d + 1))
-                if rel.to_entity == current and rel.from_entity not in visited:
-                    queue.append((rel.from_entity, d + 1))
+            for rel in adj.get(current, []):
+                neighbor = rel.to_entity if rel.from_entity == current else rel.from_entity
+                if neighbor not in visited:
+                    queue.append((neighbor, d + 1))
 
     return result
 

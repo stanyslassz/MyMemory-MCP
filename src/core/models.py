@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 # ── Closed lists (from spec §4) ──────────────────────────────
 
@@ -141,6 +141,22 @@ class GraphData(BaseModel):
     generated: str = ""
     entities: dict[str, GraphEntity] = Field(default_factory=dict)
     relations: list[GraphRelation] = Field(default_factory=list)
+    _adjacency: dict[str, list["GraphRelation"]] = PrivateAttr(default_factory=dict)
+
+    def get_adjacency(self) -> dict[str, list["GraphRelation"]]:
+        """Get or build adjacency index. Bidirectional: each relation appears
+        under both from_entity and to_entity keys."""
+        if not self._adjacency and self.relations:
+            adj: dict[str, list[GraphRelation]] = {}
+            for rel in self.relations:
+                adj.setdefault(rel.from_entity, []).append(rel)
+                adj.setdefault(rel.to_entity, []).append(rel)
+            self._adjacency = adj
+        return self._adjacency
+
+    def invalidate_adjacency(self) -> None:
+        """Call after any mutation of self.relations."""
+        self._adjacency = {}
 
 
 # ── Entity frontmatter (MD file YAML) ────────────────────────

@@ -132,11 +132,13 @@ def _sort_by_cluster(
     entity_ids = {eid for eid, _ in entities}
 
     # Build adjacency restricted to these entities
+    raw_adj = graph.get_adjacency()
     adj: dict[str, set[str]] = {eid: set() for eid in entity_ids}
-    for rel in graph.relations:
-        if rel.from_entity in entity_ids and rel.to_entity in entity_ids:
-            adj[rel.from_entity].add(rel.to_entity)
-            adj[rel.to_entity].add(rel.from_entity)
+    for eid in entity_ids:
+        for rel in raw_adj.get(eid, []):
+            other = rel.to_entity if rel.from_entity == eid else rel.from_entity
+            if other in entity_ids:
+                adj[eid].add(other)
 
     # BFS connected components
     visited: set[str] = set()

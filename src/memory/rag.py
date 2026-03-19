@@ -7,13 +7,12 @@ GraphRAG expansion, and L2→L1 mention bump.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 from src.core.config import Config
-from src.core.models import GraphData, GraphRelation, SearchResult
+from src.core.models import GraphData, SearchResult
 from src.pipeline.indexer import search as faiss_search
 from src.pipeline.keyword_index import search_keyword
 
@@ -268,9 +267,10 @@ def _expand_by_relations(
                 continue
 
             eff_strength = 0.5
-            for rel in graph.relations:
-                if (rel.from_entity == result.entity_id and rel.to_entity == neighbor_id) or \
-                   (rel.to_entity == result.entity_id and rel.from_entity == neighbor_id):
+            adj = graph.get_adjacency()
+            for rel in adj.get(result.entity_id, []):
+                other = rel.to_entity if rel.from_entity == result.entity_id else rel.from_entity
+                if other == neighbor_id:
                     eff_strength = rel.strength
                     break
 
@@ -289,15 +289,12 @@ def _expand_by_relations(
 
 def _enrich_with_relations(results: list[SearchResult], graph: GraphData) -> None:
     """Attach directional relations to each result (mutates in place)."""
-    adjacency = defaultdict(list)
-    for rel in graph.relations:
-        adjacency[rel.from_entity].append(("outgoing", rel))
-        adjacency[rel.to_entity].append(("incoming", rel))
+    raw_adj = graph.get_adjacency()
 
     for result in results:
         relations = []
-        for direction, rel in adjacency.get(result.entity_id, []):
-            if direction == "outgoing":
+        for rel in raw_adj.get(result.entity_id, []):
+            if rel.from_entity == result.entity_id:
                 target = graph.entities.get(rel.to_entity)
                 if target:
                     relations.append({

@@ -103,7 +103,7 @@ def enrich_memory(
                 slug = resolution.suggested_slug or slugify(raw_entity.name)
                 _create_new_entity(slug, raw_entity, graph, memory_path, config, today, report)
             # "ambiguous" entities should have been arbitrated already
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, OSError, ValueError, KeyError) as e:
             report.errors.append(f"Error processing {raw_entity.name}: {e}")
 
     # Process relations
@@ -155,7 +155,7 @@ def enrich_memory(
                     if entity_file.exists():
                         rel_line = f"- {rel.type} [[{rel.to_name}]]"
                         update_entity(entity_file, new_relations=[rel_line])
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, FileNotFoundError, OSError) as e:
             report.errors.append(f"Error processing relation {rel.from_name} → {rel.to_name}: {e}")
 
     # Recalculate scores (also upgrades retention)
@@ -170,8 +170,8 @@ def enrich_memory(
                 if fm.retention != entity.retention:
                     fm.retention = entity.retention
                     write_entity(entity_path, fm, sections)
-            except Exception:
-                pass
+            except (FileNotFoundError, PermissionError, OSError, ValueError) as e:
+                logger.warning("Failed to persist retention upgrade for %s: %s", eid, e)
 
     # Save graph and regenerate index
     save_graph(memory_path, graph)

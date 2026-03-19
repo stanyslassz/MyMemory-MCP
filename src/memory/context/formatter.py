@@ -166,14 +166,15 @@ def _build_natural_bullet(
 
     # 2. Integrate key relations (max 2)
     rel_parts = []
-    for rel in graph.relations:
+    adj = graph.get_adjacency()
+    for rel in adj.get(eid, []):
         if rel.strength < 0.3:
             continue
         if rel.from_entity == eid:
             target = graph.entities.get(rel.to_entity)
             if target and rel.type in RELATION_NATURAL:
                 rel_parts.append(f"{RELATION_NATURAL[rel.type]} {target.title}")
-        elif rel.to_entity == eid:
+        else:
             source = graph.entities.get(rel.from_entity)
             if source and rel.type in RELATION_NATURAL:
                 rel_parts.append(f"{RELATION_NATURAL[rel.type]} {source.title}")
@@ -242,14 +243,15 @@ def _enrich_entity_natural(
 
     # Max 3 strongest relations
     entity_rels: list[tuple[float, str]] = []
-    for rel in graph.relations:
+    adj = graph.get_adjacency()
+    for rel in adj.get(entity_id, []):
         if rel.strength < 0.3:
             continue
         if rel.from_entity == entity_id:
             target = graph.entities.get(rel.to_entity)
             if target:
                 entity_rels.append((rel.strength, f"→ {rel.type} {target.title}"))
-        elif rel.to_entity == entity_id:
+        else:
             source = graph.entities.get(rel.from_entity)
             if source:
                 entity_rels.append((rel.strength, f"← {rel.type} {source.title}"))
@@ -358,7 +360,8 @@ def _enrich_entity(
     max_rel_age_days = config.ctx.max_rel_age_days if config else 365
     entity_relations = []
     related_info = []
-    for rel in graph.relations:
+    adj = graph.get_adjacency()
+    for rel in adj.get(entity_id, []):
         # Skip weak relations
         if rel.strength < min_rel_strength:
             continue
@@ -375,7 +378,7 @@ def _enrich_entity(
             if target:
                 entity_relations.append(f"  → {rel.type} {target.title}")
                 related_info.append(f"{target.title} ({target.type})")
-        elif rel.to_entity == entity_id:
+        else:
             source = graph.entities.get(rel.from_entity)
             if source:
                 entity_relations.append(f"  ← {rel.type} {source.title}")

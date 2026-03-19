@@ -140,24 +140,34 @@ def spreading_activation(
         base_scores[eid] = _sigmoid(B + beta)
 
     # Build bidirectional adjacency with effective strengths
-    # adjacency[target] = list of (source, effective_strength)
+    # eff_adjacency[entity] = list of (neighbor, effective_strength)
+    raw_adj = graph.get_adjacency()
     adjacency: dict[str, list[tuple[str, float]]] = defaultdict(list)
 
-    for rel in graph.relations:
-        # Compute time-decayed strength using power-law (unified with ACT-R)
-        days_since = 0.0
-        if rel.last_reinforced:
-            try:
-                d = date.fromisoformat(rel.last_reinforced)
-                days_since = max((today - d).days, 0)
-            except (ValueError, TypeError):
-                days_since = 365.0
+    # Deduplicate: each relation appears under both keys in raw_adj,
+    # so process relations once via a seen set.
+    seen_rels: set[int] = set()
+    for rels in raw_adj.values():
+        for rel in rels:
+            rel_id = id(rel)
+            if rel_id in seen_rels:
+                continue
+            seen_rels.add(rel_id)
 
-        effective_strength = rel.strength * (days_since + 0.5) ** (-s.relation_decay_power)
+            # Compute time-decayed strength using power-law (unified with ACT-R)
+            days_since = 0.0
+            if rel.last_reinforced:
+                try:
+                    d = date.fromisoformat(rel.last_reinforced)
+                    days_since = max((today - d).days, 0)
+                except (ValueError, TypeError):
+                    days_since = 365.0
 
-        # Bidirectional
-        adjacency[rel.to_entity].append((rel.from_entity, effective_strength))
-        adjacency[rel.from_entity].append((rel.to_entity, effective_strength))
+            effective_strength = rel.strength * (days_since + 0.5) ** (-s.relation_decay_power)
+
+            # Bidirectional
+            adjacency[rel.to_entity].append((rel.from_entity, effective_strength))
+            adjacency[rel.from_entity].append((rel.to_entity, effective_strength))
 
     # Cap neighbors to top-N by effective strength to prevent hub dilution
     max_neighbors = config.scoring.max_spreading_neighbors

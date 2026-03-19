@@ -34,7 +34,7 @@ def test_dream_generates_report_file(tmp_path):
     console = Console(file=StringIO())
     empty_graph = GraphData(generated=datetime.now().isoformat(), entities={}, relations=[])
 
-    with patch("src.pipeline.dream._step_load", return_value=(empty_graph, {})):
+    with patch("src.pipeline.dream.maintenance._step_load", return_value=(empty_graph, {})):
         run_dream(config, console, dry_run=True, step=1)
 
     report_path = config.memory_path / "_dream_report.md"
