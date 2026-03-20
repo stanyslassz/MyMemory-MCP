@@ -360,7 +360,8 @@ def _rag_prefetch(
                 title = related_entity.title if related_entity else r.entity_id
                 preview_len = config.ctx.rag_chunk_preview_len if config else 200
                 rag_lines.append(f"- [{title}] {r.chunk[:preview_len]}")
-        except Exception:
+        except Exception as e:
+            logger.debug("RAG pre-fetch failed for entity: %s", e)
             continue
 
     max_results = config.ctx.max_rag_results if config else 15
@@ -530,8 +531,8 @@ def write_context(memory_path: Path, content: str) -> None:
     try:
         from src.memory.event_log import append_event
         append_event(memory_path, "context_rebuilt", "context", {})
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Event log append failed: %s", e)
 
 
 def generate_index(graph: GraphData) -> str:

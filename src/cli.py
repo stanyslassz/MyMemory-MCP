@@ -14,7 +14,6 @@ from src.pipeline.orchestrator import (
     auto_consolidate,
     consolidate_facts,
     fallback_to_doc_ingest,
-    is_timeout_error,
     run_pipeline,
 )
 
@@ -46,14 +45,14 @@ def cli(ctx, verbose, config_path):
 @cli.command()
 @click.pass_context
 def run(ctx):
-    """Process all pending chats → extraction → enrichment → consolidation → context → FAISS."""
+    """Process pending chats through the full pipeline (extract → resolve → enrich → consolidate → rebuild context + FAISS)."""
     run_pipeline(ctx.obj["config"], console, consolidate=True)
 
 
 @cli.command("run-light")
 @click.pass_context
 def run_light(ctx):
-    """Lightweight run: same as 'run' but skips auto-consolidation (no LLM calls for merging)."""
+    """Same as 'run' but deterministic only — skips LLM consolidation and LLM context sections."""
     run_pipeline(ctx.obj["config"], console, consolidate=False)
 
 
@@ -214,7 +213,9 @@ def inbox(ctx):
 @click.option("--dry-run", is_flag=True, help="Show what would be removed without deleting")
 @click.pass_context
 def clean(ctx, clean_all, artifacts, full, reset_chats, dry_run):
-    """Remove generated files and caches. Backs up before destructive operations."""
+    """Remove generated files and caches (with automatic backup).
+
+    Use --artifacts for index/graph only, --all for everything, --full for all + chat reset, --chats for chat reset only."""
     import shutil
     import tarfile
     import yaml
@@ -280,8 +281,8 @@ def clean(ctx, clean_all, artifacts, full, reset_chats, dry_run):
                 for path in existing_targets:
                     try:
                         tar.add(path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Backup failed for %s: %s", path, e)
             console.print(f"  [green]Backup saved ({backup_path})[/green]")
 
         # Delete
@@ -322,7 +323,8 @@ def clean(ctx, clean_all, artifacts, full, reset_chats, dry_run):
                             fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True)
                             chat_file.write_text(f"---\n{fm_yaml}---\n{body}", encoding="utf-8")
                         reset_count += 1
-                except Exception:
+                except Exception as e:
+                    logger.warning("Chat reset failed for %s: %s", chat_file.name, e)
                     continue
 
         # Move _processed back to _inbox
@@ -544,7 +546,7 @@ def dream(ctx, dry_run, step, resume, reset, show_report):
 @cli.command()
 @click.pass_context
 def context(ctx):
-    """Rebuild _context.md from current graph (no extraction, no LLM)."""
+    """Regenerate _context.md and _index.md from the current graph (rescore + rebuild, no extraction)."""
     config = ctx.obj["config"]
     from src.memory.graph import load_graph, save_graph
     from src.memory.context import build_context_for_config, write_context, write_index
@@ -568,7 +570,7 @@ def context(ctx):
 @click.option("--dry-run", is_flag=True, help="Preview without writing")
 @click.pass_context
 def relations(ctx, entity, dry_run):
-    """Discover new relations using FAISS similarity + tag overlap + co-occurrence (zero LLM)."""
+    """Discover new relations between entities (deterministic: FAISS similarity + tag overlap, zero LLM)."""
     from src.pipeline.orchestrator import discover_relations_deterministic
     from src.core.utils import slugify
 
@@ -590,7 +592,7 @@ def relations(ctx, entity, dry_run):
 @cli.command()
 @click.pass_context
 def graph(ctx):
-    """Open interactive dashboard with graph, timeline, dream replay and search."""
+    """Open the interactive HTML dashboard (graph visualization, timeline, dream history, search)."""
     config = ctx.obj["config"]
     from src.pipeline.dashboard_server import start_server
 
@@ -603,7 +605,7 @@ def graph(ctx):
 @click.option("--expand/--no-expand", default=True, help="Expand relations")
 @click.pass_context
 def search(ctx, query, top_k, expand):
-    """Search memory via RAG."""
+    """Search memory using semantic similarity (FAISS + keyword) with ACT-R reranking."""
     config = ctx.obj["config"]
     memory_path = config.memory_path
     from src.memory.rag import search as rag_search, SearchOptions
@@ -731,7 +733,7 @@ def health(ctx, fmt):
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
 @click.pass_context
 def insights(ctx, fmt):
-    """Show ACT-R cognitive insights about memory state."""
+    """Show ACT-R cognitive insights: score distribution, forgetting curve, emotional hotspots, network hubs."""
     import json as json_mod
     from src.memory.insights import compute_insights
     from src.memory.graph import load_graph

@@ -265,8 +265,8 @@ def _update_existing_entity(
     try:
         _, body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
         entity_meta.negative_valence_ratio = compute_negative_valence_ratio(body)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not recompute valence ratio for %s: %s", entity_id, e)
 
     report.entities_updated.append(entity_id)
 

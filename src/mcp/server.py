@@ -12,6 +12,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+logger = logging.getLogger(__name__)
+
 from src.core.config import Config, load_config
 from src.core.models import GraphData
 from src.memory.graph import find_entity_by_name, load_graph, remove_relation, save_graph
@@ -154,7 +156,8 @@ def search_rag(query: str) -> dict:
     try:
         from src.memory.graph import load_graph as _load_graph
         graph = _load_graph(memory_path)
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not load graph for search enrichment: %s", e)
         graph = None
 
     enriched_results = []

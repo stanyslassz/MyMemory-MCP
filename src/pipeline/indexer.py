@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 
 from src.core.config import Config
+
+logger = logging.getLogger(__name__)
 from src.core.models import SearchResult
 from src.core.utils import is_entity_file
 
@@ -50,8 +52,9 @@ def _get_spacy_nlp(language: str = "en"):
         return nlp
     except ImportError:
         return None
-    except Exception:
+    except Exception as e:
         # Network failure during download, air-gapped env, etc.
+        logger.debug("spaCy model load failed: %s", e)
         return None
 
 
@@ -147,7 +150,8 @@ def chunk_text(text: str, chunk_size: int = 400, overlap: int = 80,
         try:
             doc = nlp(text)
             sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
-        except Exception:
+        except Exception as e:
+            logger.debug("spaCy sentence split failed, using regex fallback: %s", e)
             sentences = _split_sentences_regex(text)
     else:
         sentences = _split_sentences_regex(text)
@@ -303,7 +307,8 @@ def build_index(memory_path: Path, config: Config) -> dict:
         try:
             probe = embed_fn(["test"])
             dim = probe.shape[1]
-        except Exception:
+        except Exception as e:
+            logger.debug("Embedding probe failed, using default dim=384: %s", e)
             dim = 384  # fallback for all-MiniLM-L6-v2
         base_index = faiss.IndexFlatIP(dim)
         index = faiss.IndexIDMap(base_index)

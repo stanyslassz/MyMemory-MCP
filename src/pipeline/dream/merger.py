@@ -152,7 +152,8 @@ def _step_merge_entities(
                     f"  [green]LLM confirmed duplicate: {entity_a.title} / {entity_b.title} "
                     f"(confidence={verdict.confidence:.2f})[/green]"
                 )
-            except (TimeoutError, ConnectionError, ValueError, KeyError) as e:
+            except Exception as e:
+                logger.warning("Dedup LLM check failed for %s/%s: %s", slug_a, slug_b, e)
                 report.errors.append(f"Dedup LLM check failed for {slug_a}/{slug_b}: {e}")
                 console.print(f"    [yellow]LLM dedup check failed, skipping: {e}[/yellow]")
                 continue

@@ -18,6 +18,12 @@ from src.memory.context.utilities import (
 
 logger = logging.getLogger(__name__)
 
+# Categories relevant to AI Personality section — tone, style, interaction rules only.
+# Technical facts, hardware specs, model comparisons etc. are excluded.
+AI_PERSONALITY_CATEGORIES: frozenset[str] = frozenset({
+    "ai_style", "interaction_rule", "user_reaction", "rule",
+})
+
 
 # ── Fact TTL filtering ─────────────────────────────────────
 
@@ -80,7 +86,8 @@ def _read_entity_facts(eid: str, entity: GraphEntity, memory_path: Path) -> list
     try:
         _, sections = read_entity(entity_path)
         return sections.get("Facts", [])
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not read facts for %s: %s", entity_path.name, e)
         return []
 
 
@@ -228,8 +235,8 @@ def _enrich_entity_natural(
         try:
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read entity %s for natural context: %s", entity.title, e)
 
     lines = [f"### {entity.title} [{entity.type}]"]
     if entity.summary:
@@ -316,10 +323,13 @@ def _build_section_llm(
 def _enrich_entity(
     entity_id: str, entity: GraphEntity, graph: GraphData, memory_path: Path,
     config: Config | None = None,
+    allowed_categories: frozenset[str] | None = None,
 ) -> str:
     """Build an enriched dossier string for a single entity.
 
     Reads facts from the entity's MD file and collects graph relations.
+    When *allowed_categories* is set, only facts whose category belongs to the
+    set are included (used e.g. to restrict AI Personality to style/tone facts).
     """
     # Read entity facts (with path traversal guard)
     entity_path = (memory_path / entity.file).resolve()
@@ -328,8 +338,8 @@ def _enrich_entity(
         try:
             _, sections = read_entity(entity_path)
             facts = sections.get("Facts", [])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read entity %s for structured context: %s", entity.title, e)
 
     # Build section
     section_lines = [
@@ -344,6 +354,14 @@ def _enrich_entity(
         max_cat = (config.ctx.max_facts_per_category_ai_self if is_ai_self else config.ctx.max_facts_per_category) if config else (3 if is_ai_self else 5)
         facts = filter_live_facts(facts)
         facts = _filter_expired_facts(facts, config, date.today())
+        # Category filter (e.g. AI Personality → only ai_style/interaction_rule/rule/user_reaction)
+        if allowed_categories:
+            filtered = []
+            for f in facts:
+                obs = parse_observation(f)
+                if obs and obs.get("category", "") in allowed_categories:
+                    filtered.append(f)
+            facts = filtered
         sorted_facts = _sort_facts_by_date(facts)
         threshold = config.ctx.fact_dedup_threshold if config else 0.35
         sorted_facts = _deduplicate_facts_for_context(sorted_facts, threshold=threshold, max_per_category=max_cat)

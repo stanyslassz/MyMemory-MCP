@@ -8,9 +8,12 @@ Uses the same vis-network.js + Barnes-Hut physics as visualize.py for the graph 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from src.core.config import Config
+
+logger = logging.getLogger(__name__)
 from src.core.models import DEFAULT_TYPE_COLOR as _DEFAULT_COLOR, TYPE_COLORS, GraphData
 from src.memory.graph import load_graph
 from src.core.utils import filter_live_facts
@@ -101,7 +104,8 @@ def _load_entity_details(graph: GraphData, memory_path: Path) -> dict:
                 "summary": entity.summary or "",
                 "file": entity.file,
             }
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not load entity details for %s: %s", eid, e)
             continue
     return details
 

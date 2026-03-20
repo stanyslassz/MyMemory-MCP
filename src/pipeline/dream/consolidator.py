@@ -83,7 +83,8 @@ def _step_extract_documents(
 
             mark_doc_extracted(config.faiss.manifest_path, doc_key)
             extracted += 1
-        except (TimeoutError, ConnectionError, ValueError, KeyError, OSError) as e:
+        except Exception as e:
+            logger.warning("Doc extraction failed for %s: %s", source_id, e)
             report.errors.append(f"Doc extraction failed for {source_id}: {e}")
             console.print(f"    [yellow]Failed: {e}[/yellow]")
 
@@ -124,7 +125,8 @@ def _step_consolidate_facts(
             if result["changes"]:
                 console.print(f"    [green]{', '.join(result['changes'])}[/green]")
                 report.facts_consolidated += 1
-        except (FileNotFoundError, PermissionError, OSError, ValueError, TimeoutError, ConnectionError) as e:
+        except Exception as e:
+            logger.warning("Fact consolidation failed for %s: %s", eid, e)
             report.errors.append(f"Fact consolidation failed for {eid}: {e}")
             console.print(f"    [yellow]Skipped {eid}: {e}[/yellow]")
 
@@ -197,6 +199,7 @@ def _step_generate_summaries(
                 report.summaries_generated += 1
                 display = f"{summary[:60]}..." if len(summary) > 60 else summary
                 console.print(f"  [green]{entity.title}: {display}[/green]")
-        except (FileNotFoundError, PermissionError, OSError, ValueError, TimeoutError, ConnectionError) as e:
+        except Exception as e:
+            logger.warning("Summary generation failed for %s: %s", eid, e)
             report.errors.append(f"Summary generation failed for {eid}: {e}")
             console.print(f"    [yellow]Skipped {eid}: {e}[/yellow]")

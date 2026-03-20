@@ -15,6 +15,8 @@ from src.core.utils import atomic_write_text as _atomic_write_text, filter_live_
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 
 def init_memory_structure(memory_path: Path) -> None:
     """Create memory folder structure if missing."""
@@ -190,7 +192,8 @@ def list_entities(base_path: Path) -> list[dict[str, Any]]:
         try:
             fm, _ = read_entity(md_file)
             results.append({"path": md_file, "frontmatter": fm})
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not read entity %s: %s", md_file.name, e)
             continue
     return results
 

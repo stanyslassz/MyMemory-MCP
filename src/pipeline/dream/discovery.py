@@ -142,7 +142,8 @@ def _step_discover_relations(
                 save_graph(memory_path, graph)
                 discovered += 1
                 console.print(f"    [green]{entity_a.title} -> {rel_type} -> {entity_b.title}[/green]")
-        except (TimeoutError, ConnectionError, ValueError, KeyError) as e:
+        except Exception as e:
+            logger.warning("Relation discovery failed for %s/%s: %s", eid_a, eid_b, e)
             report.errors.append(f"Relation discovery failed for {eid_a}/{eid_b}: {e}")
 
     report.relations_discovered = discovered

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from src.core.models import (
     GraphData,
     RawExtraction,
@@ -10,6 +12,8 @@ from src.core.models import (
     ResolvedExtraction,
 )
 from src.core.utils import slugify
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_entity(
@@ -61,8 +65,8 @@ def resolve_entity(
                 candidates = [s.entity_id for s in similar]
                 if candidates:
                     return Resolution(status="ambiguous", candidates=candidates)
-        except Exception:
-            pass  # FAISS not available, skip
+        except Exception as e:
+            logger.debug("FAISS resolution failed for %s: %s", name, e)
 
     # 4. New entity
     return Resolution(status="new", suggested_slug=slug)

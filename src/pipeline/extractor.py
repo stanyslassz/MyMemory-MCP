@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-
 from typing import Union, get_args
+
+logger = logging.getLogger(__name__)
 
 from src.core.config import Config
 from src.core.llm import call_extraction
@@ -200,7 +201,8 @@ def _build_extraction_context(chat_content: str, config: Config, memory_path: "P
             top_k=5, bump_mentions=False,
             expand_relations=False, use_fts5=False,
         ))
-    except Exception:
+    except Exception as e:
+        logger.debug("RAG context enrichment failed: %s", e)
         return ""
     if not results:
         return ""

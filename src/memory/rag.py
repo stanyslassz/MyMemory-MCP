@@ -256,7 +256,8 @@ def _expand_by_relations(
     for result in results[:3]:
         try:
             neighbors = get_related(graph, result.entity_id, depth=1)
-        except Exception:
+        except Exception as e:
+            logger.debug("GraphRAG expansion failed for %s: %s", result.entity_id, e)
             continue
 
         for neighbor_id in neighbors:
@@ -368,5 +369,5 @@ def _bump_mentions(
 
         try:
             append_event(memory_path, "search_performed", "rag", {"query": query[:100], "cooldown_days": cooldown_days})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Event log append failed: %s", e)

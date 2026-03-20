@@ -261,7 +261,8 @@ def rebuild_from_md(memory_path: Path) -> GraphData:
             # Parse relations from ## Relations section
             _parse_relations_from_body(body, slug, graph)
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not parse entity %s during rebuild: %s", md_file.name, e)
             continue
 
     return graph
@@ -320,8 +321,8 @@ def _parse_relations_from_body(body: str, entity_slug: str, graph: GraphData) ->
                 try:
                     rel = GraphRelation(from_entity=entity_slug, to_entity=target_slug, type=rel_type)
                     add_relation(graph, rel)
-                except Exception:
-                    pass  # Invalid relation type, skip
+                except Exception as e:
+                    logger.debug("Invalid relation in %s: %s", entity_slug, e)
 
 
 def compute_negative_valence_ratio(body: str) -> float:

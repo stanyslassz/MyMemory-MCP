@@ -106,7 +106,8 @@ def discover_batch_relations(
             results = rag_search(entity.title, config, memory_path, SearchOptions(
                 top_k=3, bump_mentions=False, use_fts5=False, rerank_actr=False,
             ))
-        except Exception:
+        except Exception as e:
+            logger.debug("FAISS search failed for relation discovery %s: %s", eid, e)
             continue
         for result in results:
             other_id = result.entity_id
@@ -195,7 +196,8 @@ def consolidate_facts(config, console, dry_run: bool, min_facts: int) -> None:
             threshold = min(min_facts, max_facts)
             if len(live_facts) >= threshold:
                 candidates.append((eid, entity, entity_path, len(live_facts), max_facts))
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not check consolidation candidate %s: %s", eid, e)
             continue
 
     if not candidates:
@@ -421,7 +423,8 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
             results = rag_search(entity.title, config, memory_path, SearchOptions(
                 top_k=5, bump_mentions=False, use_fts5=False, rerank_actr=False,
             ))
-        except Exception:
+        except Exception as e:
+            logger.debug("FAISS search failed for batch relation %s: %s", eid, e)
             continue
         for result in results:
             other_id = result.entity_id
@@ -477,7 +480,8 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
                     for b in entities_list[i+1:]:
                         pair = tuple(sorted([a, b]))
                         co_occurrence[pair] = co_occurrence.get(pair, 0) + 1
-            except Exception:
+            except Exception as e:
+                logger.debug("Co-occurrence scan failed for chat: %s", e)
                 continue
 
         for (a, b), count in co_occurrence.items():
@@ -532,7 +536,8 @@ def discover_relations_deterministic(config, memory_path, console, *, entity_fil
                             existing.add((slug_from, slug_to))
                             existing.add((slug_to, slug_from))
                             discovered += 1
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("NER relation extraction failed for chat: %s", e)
                         continue
         except ImportError:
             pass

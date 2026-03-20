@@ -7,7 +7,10 @@ legend, Barnes-Hut solver for large graphs, double-click focus.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from src.core.models import DEFAULT_TYPE_COLOR as _DEFAULT_COLOR, TYPE_COLORS as _TYPE_COLORS, GraphData
 from src.core.utils import filter_live_facts
@@ -34,8 +37,8 @@ def generate_graph_html(graph: GraphData, output_path: Path, memory_path: Path |
                     _, sections = read_entity_fn(entity_path)
                     raw_facts = filter_live_facts(sections.get("Facts", []))
                     facts = raw_facts[:5]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Could not read entity %s for visualization: %s", eid, e)
 
         # Collect relations for this entity
         related: list[str] = []
